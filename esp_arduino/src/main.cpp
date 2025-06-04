@@ -1,14 +1,48 @@
-#include <Arduino.h>  // Include the Arduino core functions
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
 
-#define LED_PIN 2  // GPIO 2 is usually the onboard LED
+Adafruit_ADS1015 ads1015_1;
+Adafruit_ADS1015 ads1015_2;
 
-void setup() {
-  pinMode(LED_PIN, OUTPUT); // Set LED pin as output
+void setup(void)
+{
+  Serial.begin(115200);
+  Serial.println("Hello!");
+
+  Serial.println("Getting single-ended readings from AIN0..3");
+  Serial.println("ADC Range: +/- 6.144V (1 bit = 3mV)");
+  Wire.begin(15, 14);
+  ads1015_1.begin(0x48);
+  ads1015_2.begin(0x49);
 }
 
-void loop() {
-  digitalWrite(LED_PIN, HIGH); // Turn the LED on
-  delay(1000);                 // Wait for 1 second
-  digitalWrite(LED_PIN, LOW);  // Turn the LED off
-  delay(1000);                 // Wait for 1 second
+void loop(void)
+{
+  int16_t adc0, adc1, adc2, adc3, adc4;
+
+  // นิ้วโป้งหรรสา
+  adc0 = ads1015_2.readADC_SingleEnded(0);
+
+  adc1 = ads1015_1.readADC_SingleEnded(0);
+  adc2 = ads1015_1.readADC_SingleEnded(1);
+  adc3 = ads1015_1.readADC_SingleEnded(2);
+  adc4 = ads1015_1.readADC_SingleEnded(3);
+
+  
+
+
+  Serial.print(adc0); Serial.print(",");
+  Serial.print(adc1); Serial.print(",");
+  Serial.print(adc2); Serial.print(",");
+  Serial.print(adc3); Serial.print(",");
+  Serial.println(adc4);
+
+  // Serial.print("AIN1: "); Serial.println(adc4);
+  // Serial.print("AIN2: "); Serial.println(adc0);
+  // Serial.print("AIN3: "); Serial.println(adc1);
+  // Serial.print("AIN4: "); Serial.println(adc2);
+  // Serial.print("AIN5: "); Serial.println(adc3);
+  // Serial.println(" ");
+
+  delay(100);
 }
