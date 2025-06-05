@@ -40,6 +40,13 @@ float accel_offsetX = 0, accel_offsetY = 0, accel_offsetZ = 0;
 float gyro_offsetX  = 0, gyro_offsetY  = 0, gyro_offsetZ  = 0;
 bool  calibrated    = false;
 
+float mean_acd_max[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+float mean_acd_low[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+float low_value = 0.0;
+float high_value = 1000.0;
+// ──── SENSOR VARIABLES ──────────────────────────────────────────
+int16_t adc0, adc1, adc2, adc3, adc4;
+
 // Simple low-pass filter state
 static const float alpha = 0.1f;
 float filteredAccelX = 0, filteredAccelY = 0, filteredAccelZ = 0;
@@ -62,7 +69,8 @@ const uint32_t LOOP_PERIOD_MS = 10;  // target ~100 Hz
 uint32_t nextLoopTime = 0;
 
 // ──── PROTOTYPES ────────────────────────────────────────────────────────────────
-void performCalibration();
+void flexCalibration();
+void gyroCalibration();
 void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
                           float &roll, float &pitch, float &yaw);
@@ -164,7 +172,7 @@ void setup() {
   Serial.print("[Arduino] "); Serial.println(F("🔧 QMI8658 sensor configured (8G/512DPS, 1000 Hz)."));
 
   // ─── CALIBRATION ───────────────────────────────────────────────────────────────
-  performCalibration();
+  gyroCalibration();
 
   // ─── HEADER FOR CSV OUTPUT ────────────────────────────────────────────────────
   // Now includes filteredAccelX,Y,Z and filteredGyroX,Y,Z
@@ -178,7 +186,16 @@ void setup() {
   nextLoopTime = millis();
 }
 
+int time_count = 0;
+unsigned long start_time = 0;
+bool time_set = false;
+float flex_raw_value[5];
+float flex_cal[5];
 void loop() {
+  if (!(time_set)){
+      start_time = millis();
+      time_set = true;
+  }
   // ─── SERIAL COMMAND HANDLING ────────────────────────────────────────────────
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n'); // Read until newline
@@ -191,11 +208,63 @@ void loop() {
       Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
       Serial.print("[Arduino] "); Serial.println(F("│          [Arduino] ➤ Available commands         │"));
       Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣾⣷⣄⠀⠀⠀⣀⣤⣤⣤⡀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣶⠏⠀⠀⣿⠀⢀⡾⠛⠋⠀⣾⣿⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡏⠀⠀⠀⣿⢀⣾⠁⠀⣰⠆⢹⡿⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃⣧⠀⠀⢠⡟⢸⡇⠀⣰⠟⠀⣼⠃⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣹⣆⢀⣸⣇⣸⠃⢠⡏⠀⣸⠋⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣤⣴⣶⣶⣶⠾⠟⠛⠉⠉⠉⠈⠉⠉⠛⠁⢾⠁⣴⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣤⣶⣶⠾⠟⠛⠛⣻⣿⣙⡁⠀⠀⢾⣶⣾⣷⣿⣶⣄⠀⠀⠀⠀⠰⢿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⢀⣀⣀⣀⣠⣴⣶⣶⠾⠟⠛⠉⠉⠉⠀⠀⠀⠀⠀⣿⣻⣟⣻⣿⡦⠀⠘⣿⣿⣛⡿⢶⡇⠀⠀⠀⠀⠀⠀⢻⣆⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣠⣶⣶⣶⣾⣿⣿⣿⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡟⠙⣿⣿⡗⠀⠀⠿⠉⣿⣿⣿⣶⠀⠀⠀⠀⠀⠀⠈⢿⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠳⣄⣿⡿⠁⠀⠀⠘⢦⣿⣿⠇⠟⠁⠀⠀⠀⠀⠀⠀⣸⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⣇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡏⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣇⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢤⣤⡀⠀⠀⠀⠀⠀⠀⠀⣿⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠈⠙⢿⣿⣿⣿⣿⣿⣿⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⡾⠟⠛⠆⠀⠀⠀⠀⠀⢀⢻⡇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠈⠙⠿⣿⣭⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⠾⠟⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣾⠇⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⠛⠷⠶⢶⣶⣦⣤⣴⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣌⣿⠀⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠙⠛⠛⠛⠃⠀⠀⠀⠀⠀⠀⠀⣤⣴⣾⣿⣿⣿⣓⠀⠀⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⣿⣷⣦⣄⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣠⣤⣶⣾⣟⣯⣽⠟⠋⠀⠉⠳⣄⠀⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⢇⠀⠉⠛⠷⣮⣍⣩⡍⢻⡟⠉⣉⢹⡏⠉⣿⣹⣷⣦⣿⠿⠟⠉⠀⠀⠀⠀⠀⠀⠙⣆⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⠏⢸⠇⠀⠀⠀⠀⠀⠉⠉⠛⠛⠛⠛⠛⠛⠛⠋⠉⠉⠀⠀⠀⠀⠀⢠⣠⡶⠀⠀⠀⠀⠘⣧⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡿⠀⣸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⠟⠁⠀⠀⠀⠀⠀⠘⣆⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⠃⠀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⣇⡀⠀⠀⠀⠀⠀⠀⢹⡆⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣾⠀⣾⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢿⣥⢠⣤⠼⠇⠀⠀⠘⣿⡄\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣽⡄⠈⢿⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣿⠿⠾⠷⠄⠀⠀⠀⢀⣿⠁\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣧⠀⠸⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣤⣾⠋⠀⠀⠀⠀⠀⠀⢰⣾⡿⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⣦⣠⣿⣿⣶⣶⣤⣤⣄⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣠⣴⣿⣇⠀⠀⠀⠀⠀⠀⠀⣸⡟⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢻⣿⠀⠉⠛⢿⣿⣯⣿⡟⢿⠻⣿⢻⣿⢿⣿⣿⣿⣿⣿⠿⠟⠹⣟⢷⣄⠀⠀⠀⢀⣼⠟⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣄⠀⠀⠘⢷⣌⡻⠿⣿⣛⣿⣟⣛⣛⣋⣉⣉⣉⣀⡀⠀⠀⠈⠻⢿⣷⣶⣶⢛⣧⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣏⠀⠀⠀⠀⠹⢯⣟⣛⢿⣿⣽⣅⣀⡀⠀⣀⡀⠀⠀⠀⠠⢦⣀⠰⡦⠀⢸⠀⣏⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⡀⠀⠀⠀⠀⠀⠀⠈⠉⢻⣿⡟⠛⠉⠉⠁⠀⠀⠀⠀⠀⠀⠈⠛⠷⠀⣸⠀⣿⡀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣧⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠀⣿⡇⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⢿⠀⠀⢦⡀⡀⠀⠀⠀⠀⢹⣿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⡄⡏⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡄⠀⠈⠳⣝⠦⢄⠀⠀⠀⣟⣷⠀⠀⠀⣷⣄⠀⠀⠀⠀⠀⠀⠀⠀⣿⡇⡇⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣄⣷⡀⠀⠀⠈⠙⠂⠀⠀⠀⢸⣿⡄⠀⠀⠘⢦⡙⢦⡀⠀⠀⠀⠀⢰⣷⣷⡇⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⡿⢧⣤⣀⡀⠀⠀⠀⠀⠀⠀⢿⣷⣄⠀⠀⠀⠁⠋⠀⠀⠀⠀⠀⢸⣿⣿⣇⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣷⡀⠈⠉⠛⠛⠛⠛⠛⠛⠛⠛⢿⡍⠛⠳⠶⣶⣤⣤⣤⣤⣤⣤⠼⠟⡟⢿⡇⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠰⣾⡇⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣤⣴⣿⣷⣶⣶⣶⣶⣶⣶⣦⣀⣀⣀⣻⡀⠀⠀⠀⣀⣀⠀⡀⠀⠀⠀⢀⣼⣿⠇⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⠟⠉⠁⠀⠀⠈⠻⣿⡆⢹⣯⣽⣿⣿⠟⠋⠙⣿⣶⣿⣿⣿⣿⣾⣿⣿⣿⣟⠋⠉⣇⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇⠀⠀⠀⡀⠀⠀⠀⠈⢻⣆⣿⠀⠀⠀⢁⣶⣿⠿⠟⠛⠷⣶⣽⣿⣿⣻⣏⠙⠃⣴⢻⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣷⣀⠀⠀⠉⠀⠀⠀⠀⠀⢹⣿⠀⣀⣴⣿⠋⠀⠀⠀⠀⠀⠀⠉⠻⣿⣧⣿⢀⣰⣿⣿⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢿⣶⣶⣤⣤⣤⣤⣤⣤⣾⣿⣟⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣅⣾⢿⣵⠇⠀⠀⠀⠀\n");
+      Serial.print(u8"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠛⠛⠛⠛⠛⠛⠛⠉⠉⠉⠁⢹⣜⠷⠦⠤⠤⠤⠤⠤⠴⠶⠛⣉⣱⠿⠁⠀⠀⠀⠀⠀\n");
+      Serial.println();
+      Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+      Serial.print("[Arduino] "); Serial.println(F("│          [Arduino] ➤ Available commands         │"));
+      Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
       Serial.println();
       // Serial.println("[Arduino] ➤ Available commands:");
       Serial.print("[Arduino] "); Serial.println("  help          - Show this help message");
       Serial.print("[Arduino] "); Serial.println("  reset         - Reboot the device");
-      Serial.print("[Arduino] "); Serial.println("  calibration   - Perform sensor/device calibration");
+      Serial.print("[Arduino] "); Serial.println("  gyro_cal      - gyro_Calibration");
+      Serial.print("[Arduino] "); Serial.println("  flex_cal      - flex_Calibration");
     }
     else if (command == "reset") {
       Serial.print("[Arduino] "); Serial.println("➤ Rebooting now…");
@@ -203,40 +272,54 @@ void loop() {
       ESP.restart();         // Software reset
       // (no code after ESP.restart() will run)
     }
-    else if(command == "calibration"){
-      performCalibration();
+    else if(command == "gyro_cal"){
+      gyroCalibration();
+    }
+    else if(command == "flex_cal"){
+      flexCalibration();
     }
 
     // … other processing for commands like "cal" below …
   }
 
-  // ─── NON-BLOCKING SERIAL CHECK FOR "cal" ────────────────────────────────────
-  if (Serial.available()) {
-    // Read up to 4 chars or until newline
-    char cmdBuf[5] = {0};
-    size_t len = Serial.readBytesUntil('\n', cmdBuf, 4);
-    cmdBuf[len] = '\0';
-    if (strcasecmp(cmdBuf, "cal") == 0 || strcasecmp(cmdBuf, "calibrate") == 0) {
-      Serial.println();  // blank line
-      Serial.print("[Arduino] "); Serial.println(F("🔄 Re‐calibrating IMU..."));
-      performCalibration();
-    }
-  }
+  // // ─── NON-BLOCKING SERIAL CHECK FOR "cal" ────────────────────────────────────
+  // if (Serial.available()) {
+  //   // Read up to 4 chars or until newline
+  //   char cmdBuf[5] = {0};
+  //   size_t len = Serial.readBytesUntil('\n', cmdBuf, 4);
+  //   cmdBuf[len] = '\0';
+  //   if (strcasecmp(cmdBuf, "cal") == 0 || strcasecmp(cmdBuf, "cal") == 0) {
+  //     Serial.println();  // blank line
+  //     Serial.print("[Arduino] "); Serial.println(F("🔄 Re‐calibrating IMU..."));
+  //     gyroCalibration();
+  //   }
+  // }
 
   // ─── TIMING: ENSURE ~100 Hz LOOP ─────────────────────────────────────────────
-  uint32_t now = millis();
-  if ((int32_t)(now - nextLoopTime) < 0) {
-    return;  // not yet time for next iteration
-  }
-  nextLoopTime += LOOP_PERIOD_MS;
+  // uint32_t now = millis();
+  // if ((int32_t)(now - nextLoopTime) < 0) {
+  //   return;  // not yet time for next iteration
+  // }
+  // nextLoopTime += LOOP_PERIOD_MS;
 
   // ─── 2) READ ADS1015 ADC CHANNELS ───────────────────────────────────────────
-  int16_t adc0 = ads1015_2.readADC_SingleEnded(0);
-  int16_t adc1 = ads1015_1.readADC_SingleEnded(0);
-  int16_t adc2 = ads1015_1.readADC_SingleEnded(1);
-  int16_t adc3 = ads1015_1.readADC_SingleEnded(2);
-  int16_t adc4 = ads1015_1.readADC_SingleEnded(3);
-
+  // adc0 = ads1015_2.readADC_SingleEnded(0);
+  // adc1 = ads1015_1.readADC_SingleEnded(0);
+  // adc2 = ads1015_1.readADC_SingleEnded(1);
+  // adc3 = ads1015_1.readADC_SingleEnded(2);
+  // adc4 = ads1015_1.readADC_SingleEnded(3);
+  flex_raw_value[0] = ads1015_2.readADC_SingleEnded(0);
+  flex_raw_value[1] = ads1015_1.readADC_SingleEnded(0);
+  flex_raw_value[2] = ads1015_1.readADC_SingleEnded(1);
+  flex_raw_value[3] = ads1015_1.readADC_SingleEnded(2);
+  flex_raw_value[4] = ads1015_1.readADC_SingleEnded(3);
+  for (int i = 0; i < 5; i++) {
+    // Apply two-point calibration
+    flex_cal[i] = ((flex_raw_value[i] - mean_acd_low[i]) * (high_value - low_value) / (mean_acd_max[i] - mean_acd_low[i])) + low_value;
+    // Clamp the values within the reference range
+    if (flex_cal[i] < low_value) flex_cal[i] = low_value;
+    if (flex_cal[i] > high_value) flex_cal[i] = high_value;
+  }
   // ─── 3) READ & PROCESS IMU ───────────────────────────────────────────────────
   float roll = 0, pitch = 0, yaw = 0;
   float accelMagSq = 0, gyroMagSq = 0;
@@ -286,27 +369,113 @@ void loop() {
     "%lu,%d,%.2f,%.2f,%.2f,"   // now, motion, roll, pitch, yaw
     "%.4f,%.4f,%.4f,"         // filteredAccelX, filteredAccelY, filteredAccelZ
     "%.4f,%.4f,%.4f,"         // filteredGyroX, filteredGyroY, filteredGyroZ
-    "%d,%d,%d,%d,%d",         // ADC0, ADC1, ADC2, ADC3, ADC4
-    now,
+    "%.4f,%.4f,%.4f,%.4f,%.4f",         // ADC0, ADC1, ADC2, ADC3, ADC4
+    millis() - start_time,
     (motionDetected ? 1 : 0),
     roll, pitch, yaw,
     filteredAccelX, filteredAccelY, filteredAccelZ,
     filteredGyroX, filteredGyroY, filteredGyroZ,
-    adc0, adc1, adc2, adc3, adc4
+    flex_cal[0], flex_cal[1], flex_cal[2], flex_cal[3], flex_cal[4]
   );
   if (n > 0) {
+    time_count++;
     Serial.print("[Sensor] ");
     Serial.println(outBuf);
+    // Serial.print(outBuf);Serial.print(" time_count:");Serial.print(time_count);
+    // Serial.print("\n");
   }
+
   delay(10);
+  if ((millis() - start_time) >= 1000){
+    // Serial.print("[Arduino] ");
+    // Serial.print("in 1 s : ");Serial.println(time_count);
+    time_count = 0;
+    start_time = millis();
+  }
+}
+
+const int numSamples = 500;  // reduced to speed up calibration
+float sensor_value[5];
+
+// ─── PERFORM Flex CALIBRATION ─────────────────────────────────────────────────────
+void flexCalibration() {
+  // Reset values
+  for (int i = 0; i < 5; i++) {
+    mean_acd_max[i] = 0.0;
+    mean_acd_low[i] = 0.0;
+  }
+
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│           🎯 Starting Flex calibration           │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+
+  delay(3000);
+  Serial.print("[Arduino] "); Serial.println(F("Do what I told you!!!!!!!! for better calibration"));
+
+  for (int i = 5; i > 0; i--) {
+    Serial.print("[Arduino] "); Serial.print(i); Serial.println(F("..."));
+    delay(1000);
+  }
+
+  // Two calibration phases: normal hand (0), and fist (1)
+  for (int phase = 0; phase < 2; phase++) {
+    if (phase == 0) {
+      Serial.print("[Arduino] "); Serial.println(F("มือปกติ (normal hand) - start in 5 sec..."));
+    } else {
+      Serial.print("[Arduino] "); Serial.println(F("กำหมัด (fist) - start in 5 sec..."));
+    }
+
+    for (int i = 5; i > 0; i--) {
+      Serial.print("[Arduino] "); Serial.print(i); Serial.println(F("..."));
+      delay(1000);
+    }
+
+    Serial.print("[Arduino] "); Serial.print(F("📈 Collecting "));
+    Serial.print(numSamples); Serial.println(F(" samples:"));
+
+    // Collect samples
+    for (int j = 0; j < numSamples; j++) {
+      sensor_value[0] = ads1015_2.readADC_SingleEnded(0);
+      sensor_value[1] = ads1015_1.readADC_SingleEnded(0);
+      sensor_value[2] = ads1015_1.readADC_SingleEnded(1);
+      sensor_value[3] = ads1015_1.readADC_SingleEnded(2);
+      sensor_value[4] = ads1015_1.readADC_SingleEnded(3);
+
+      for (int k = 0; k < 5; k++) {
+        if (phase == 0) {
+          mean_acd_max[k] += sensor_value[k];
+        } else {
+          mean_acd_low[k] += sensor_value[k];
+        }
+      }
+
+      delay(5); // Optional: small delay between samples
+    }
+
+    // Average calculation
+    for (int k = 0; k < 5; k++) {
+      if (phase == 0) {
+        mean_acd_max[k] /= numSamples;
+      } else {
+        mean_acd_low[k] /= numSamples;
+      }
+    }
+  }
+
+  Serial.println(F("[Arduino] ✅ Calibration complete."));
 }
 
 
+float sumAx = 0, sumAy = 0, sumAz = 0;
+float sumGx = 0, sumGy = 0, sumGz = 0;
+int   validSamples = 0;
 // ─── PERFORM IMU CALIBRATION ─────────────────────────────────────────────────────
-void performCalibration() {
+void gyroCalibration() {
   Serial.println();
   Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
-  Serial.print("[Arduino] "); Serial.println(F("│           🎯 Starting IMU calibration            │"));
+  Serial.print("[Arduino] "); Serial.println(F("│           🎯Starting Gyro calibration            │"));
   Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
   Serial.println();
   delay(3000);
@@ -318,10 +487,7 @@ void performCalibration() {
     delay(1000);
   }
 
-  const int numSamples = 500;  // reduced to speed up calibration
-  float sumAx = 0, sumAy = 0, sumAz = 0;
-  float sumGx = 0, sumGy = 0, sumGz = 0;
-  int   validSamples = 0;
+  
 
   Serial.print("[Arduino] "); Serial.print(F("📈 Collecting "));
   Serial.print(numSamples);
