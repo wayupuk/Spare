@@ -4,10 +4,12 @@
 #include <WiFi.h>
 #include <time.h>
 #include <esp_sntp.h>
+#include "esp_task_wdt.h"
 
 #include <Adafruit_ADS1X15.h>
 #include <QMI8658.h>
 #include <SensorPCF8563.hpp>  // PCF8563 RTC driver
+
 
 // ──── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 #ifndef SENSOR_SCL
@@ -22,16 +24,10 @@
 #define SENSOR_IRQ  4   // PCF8563 interrupt pin (if used)
 #endif
 
+#define WDT_TIMEOUT 3 // Timeout in seconds
 // ──── WIFI & NTP SETTINGS ───────────────────────────────────────────────────────
 const char *ssid       = "LoveSugarRain_2.4G";
 const char *password   = "0954849012";
-
-const char *ntpServer1 = "pool.ntp.org";
-const char *ntpServer2 = "time.nist.gov";
-const long  gmtOffset_sec   = 3600;      // GMT+1 (if you prefer fixed offsets; but we use TZ string below)
-const int   daylightOffset_sec = 3600;   // DST offset (unused if TZ string handles it)
-
-const char *timeZone = "CST-8";  // Thailand: UTC+7 (TZ string format for ESP32)
 
 // ──── PERIPHERAL OBJECTS ───────────────────────────────────────────────────────
 SensorPCF8563    rtc;
@@ -45,23 +41,32 @@ float gyro_offsetX  = 0, gyro_offsetY  = 0, gyro_offsetZ  = 0;
 bool  calibrated    = false;
 
 // Simple low-pass filter state
-const float alpha = 0.1f;
+static const float alpha = 0.1f;
 float filteredAccelX = 0, filteredAccelY = 0, filteredAccelZ = 0;
 float filteredGyroX  = 0, filteredGyroY  = 0, filteredGyroZ  = 0;
 
 // ──── MOTION DETECTION VARIABLES ──────────────────────────────────────────────
-const float accelThreshold = 2.0f;   // m/s² deviation from 9.81 m/s²
-const float gyroThreshold  = 10.0f;  // deg/s
+// Using squared thresholds to avoid sqrt()
+static const float GRAVITY       = 9.81f;
+static const float accelThreshold = 2.0f;   // m/s²
+static const float gyroThreshold  = 10.0f;  // deg/s
+static const float highSq        = (GRAVITY + accelThreshold) * (GRAVITY + accelThreshold);
+static const float lowSq         = (GRAVITY - accelThreshold) * (GRAVITY - accelThreshold);
+static const float gyroThSq      = gyroThreshold * gyroThreshold;
+
 bool  motionDetected       = false;
 unsigned long lastMotionTime = 0;
 
+// ──── LOOP TIMER ───────────────────────────────────────────────────────────────
+const uint32_t LOOP_PERIOD_MS = 10;  // target ~100 Hz
+uint32_t nextLoopTime = 0;
+
 // ──── PROTOTYPES ────────────────────────────────────────────────────────────────
-// void timeSyncCallback(struct timeval *tv);
 void performCalibration();
 void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
                           float &roll, float &pitch, float &yaw);
-void checkMotion(float accelMag, float gyroMag);
+void checkMotionSq(float accelMagSq, float gyroMagSq);
 
 void setup() {
   // ─── SERIAL & WIRE ───────────────────────────────────────────────────────────
@@ -69,114 +74,161 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
+
   Serial.println();
-  Serial.println("┌──────────────────────────────────────────────────┐");
-  Serial.println("│      ESP32 Sensor Logging (ADS1015 + QMI8658)    │");
-  Serial.println("└──────────────────────────────────────────────────┘");
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│                 ESP32S3 SKB(Optimized)           │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
   Serial.println();
 
   // ─── RTC (PCF8563) INITIALIZATION ────────────────────────────────────────────
   pinMode(SENSOR_IRQ, INPUT_PULLUP);
   Wire.begin(SENSOR_SDA, SENSOR_SCL);
   if (!rtc.begin(Wire, SENSOR_SDA, SENSOR_SCL)) {
-    Serial.println("❌ Failed to find PCF8563 RTC. Check wiring!");
+    Serial.print("[Arduino] "); Serial.println(F("❌ Failed to find PCF8563 RTC. Check wiring!"));
     while (true) {
       delay(1000);
-      Serial.println("⏳ Waiting for PCF8563...");
+      Serial.print("[Arduino] "); Serial.println(F("⏳ Waiting for PCF8563..."));
     }
   }
-  Serial.println("✅ PCF8563 RTC initialized.");
-
-  // ─── SNTP / NTP-TO-RTC SYNCHRO ────────────────────────────────────────────────
-  // sntp_set_time_sync_notification_cb(timeSyncCallback);
-  // configTzTime(timeZone, ntpServer1, ntpServer2);
-  // Serial.println("🔄 SNTP client started, waiting for time sync...");
+  Serial.print("[Arduino] "); Serial.println(F("✅ PCF8563 RTC initialized."));
 
   // ─── WI-FI SETUP ─────────────────────────────────────────────────────────────
-  Serial.print("Connecting to Wi-Fi: ");
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│                 Connecting to Wi-Fi:             │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+  // Serial.print("[Arduino] "); Serial.print(F("Connecting to Wi-Fi: "));
   Serial.println(ssid);
   WiFi.begin(ssid, password);
   unsigned long wifiStart = millis();
+  Serial.print("[Arduino] ");
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+    delay(200);
+    Serial.print(F("."));
     if (millis() - wifiStart > 10000) {
       Serial.println();
-      Serial.println("⚠️  Wi-Fi connect timeout. Retrying...");
+      Serial.print("[Arduino] "); Serial.println(F("⚠️  Wi-Fi connect timeout. Retrying..."));
       wifiStart = millis();
       WiFi.begin(ssid, password);
     }
   }
   Serial.println();
-  Serial.print("✅ Connected to Wi-Fi. IP: ");
+  Serial.print("[Arduino] "); Serial.print(F("✅ Connected to Wi-Fi. IP: "));
   Serial.println(WiFi.localIP());
 
   // ─── ADS1015 INITIALIZATION ─────────────────────────────────────────────────
   Serial.println();
-  Serial.println("Initializing ADS1015 #1 (address 0x48)...");
+  Serial.print("[Arduino] "); Serial.println(F("Initializing ADS1015 #1 (0x48)..."));
   if (!ads1015_1.begin(0x48)) {
-    Serial.println("❌ Failed to find ADS1015 at 0x48. Check wiring/address!");
+    Serial.print("[Arduino] "); Serial.println(F("❌ Failed to find ADS1015 #1!"));
     while (true) {
       delay(1000);
-      Serial.println("⏳ Waiting for ADS1015 #1...");
+      Serial.print("[Arduino] "); Serial.println(F("⏳ Waiting for ADS1015 #1..."));
     }
   }
-  Serial.println("✅ ADS1015 #1 OK.");
+  Serial.print("[Arduino] "); Serial.println(F("✅ ADS1015 #1 OK."));
 
-  Serial.println("Initializing ADS1015 #2 (address 0x49)...");
+  Serial.print("[Arduino] "); Serial.println(F("Initializing ADS1015 #2 (0x49)..."));
   if (!ads1015_2.begin(0x49)) {
-    Serial.println("❌ Failed to find ADS1015 at 0x49. Check wiring/address!");
+    Serial.print("[Arduino] "); Serial.println(F("❌ Failed to find ADS1015 #2!"));
     while (true) {
       delay(1000);
-      Serial.println("⏳ Waiting for ADS1015 #2...");
+      Serial.print("[Arduino] "); Serial.println(F("⏳ Waiting for ADS1015 #2..."));
     }
   }
-  Serial.println("✅ ADS1015 #2 OK.");
+  Serial.print("[Arduino] "); Serial.println(F("✅ ADS1015 #2 OK."));
 
   // ─── QMI8658 IMU INITIALIZATION ───────────────────────────────────────────────
   Serial.println();
-  Serial.println("Initializing QMI8658 IMU...");
+  Serial.print("[Arduino] "); Serial.println(F("Initializing QMI8658 IMU..."));
   if (!imu.begin(SENSOR_SDA, SENSOR_SCL)) {
-    Serial.println("❌ Failed to initialize QMI8658. Check wiring!");
+    Serial.print("[Arduino] "); Serial.println(F("❌ Failed to initialize QMI8658. Check wiring!"));
     while (true) {
       delay(1000);
-      Serial.println("⏳ Waiting for QMI8658...");
+      Serial.print("[Arduino] "); Serial.println(F("⏳ Waiting for QMI8658..."));
     }
   }
-  Serial.println("✅ QMI8658 initialized.");
-  Serial.print("   WHO_AM_I: 0x");
+  Serial.print("[Arduino] "); Serial.println(F("✅ QMI8658 initialized."));
+  Serial.print("[Arduino] "); Serial.print(F("   WHO_AM_I: 0x"));
   Serial.println(imu.getWhoAmI(), HEX);
 
-  // Configure ranges, ODRs, units
   imu.setAccelRange(QMI8658_ACCEL_RANGE_8G);
   imu.setAccelODR(QMI8658_ACCEL_ODR_1000HZ);
   imu.setGyroRange(QMI8658_GYRO_RANGE_512DPS);
   imu.setGyroODR(QMI8658_GYRO_ODR_1000HZ);
-  imu.setAccelUnit_mps2(true);  // output in m/s²
-  imu.setGyroUnit_rads(false);  // output in deg/s
+  imu.setAccelUnit_mps2(true);
+  imu.setGyroUnit_rads(false);  // deg/s
   imu.enableSensors(QMI8658_ENABLE_ACCEL | QMI8658_ENABLE_GYRO);
-  Serial.println("🔧 QMI8658 sensor configured (8g/512dps, 1000Hz).");
+  Serial.print("[Arduino] "); Serial.println(F("🔧 QMI8658 sensor configured (8G/512DPS, 1000 Hz)."));
 
   // ─── CALIBRATION ───────────────────────────────────────────────────────────────
   performCalibration();
 
   // ─── HEADER FOR CSV OUTPUT ────────────────────────────────────────────────────
+  // Now includes filteredAccelX,Y,Z and filteredGyroX,Y,Z
   Serial.println();
-  Serial.println("Time(ms),Motion,Roll,Pitch,Yaw,Accel_Mag,Gyro_Mag,ADC0,ADC1,ADC2,ADC3,ADC4");
-  Serial.println("-------------------------------------------------------------------------------");
+  Serial.print("[Arduino] "); Serial.println(F("Time(ms),Motion,Roll,Pitch,Yaw,"
+                   "fAccX,fAccY,fAccZ,fGyroX,fGyroY,fGyroZ,"
+                   "ADC0,ADC1,ADC2,ADC3,ADC4"));
+  // Serial.print("[Sensor] "); Serial.println(F("-----------------------------------------------------------------------"));
+
+  // ─── SET INITIAL LOOP TIME ────────────────────────────────────────────────────
+  nextLoopTime = millis();
 }
 
 void loop() {
-  // ─── 1) GET & PRINT LOCAL TIME ───────────────────────────────────────────────
-  // struct tm timeinfo;
-  // if (getLocalTime(&timeinfo)) {
-  //   char timeBuf[64];
-  //   strftime(timeBuf, sizeof(timeBuf), "%A, %B %d %Y %H:%M:%S", &timeinfo);
-  //   Serial.println(timeBuf);
-  // } else {
-  //   // Silently skip if SNTP hasn’t synced yet (or if it failed briefly)
-  //   // Serial.println("⚠️  Failed to obtain local time.");
-  // }
+  // ─── SERIAL COMMAND HANDLING ────────────────────────────────────────────────
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n'); // Read until newline
+    command.trim();                                // Remove any trailing CR/LF or spaces
+    Serial.print("[Arduino] Received: ");
+    Serial.println(command);
+
+    if(command == "help"){
+      Serial.println();
+      Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+      Serial.print("[Arduino] "); Serial.println(F("│          [Arduino] ➤ Available commands         │"));
+      Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+      Serial.println();
+      // Serial.println("[Arduino] ➤ Available commands:");
+      Serial.print("[Arduino] "); Serial.println("  help          - Show this help message");
+      Serial.print("[Arduino] "); Serial.println("  reset         - Reboot the device");
+      Serial.print("[Arduino] "); Serial.println("  calibration   - Perform sensor/device calibration");
+    }
+    else if (command == "reset") {
+      Serial.print("[Arduino] "); Serial.println("➤ Rebooting now…");
+      delay(50);             // Give the print a moment to flush
+      ESP.restart();         // Software reset
+      // (no code after ESP.restart() will run)
+    }
+    else if(command == "calibration"){
+      performCalibration();
+    }
+
+    // … other processing for commands like "cal" below …
+  }
+
+  // ─── NON-BLOCKING SERIAL CHECK FOR "cal" ────────────────────────────────────
+  if (Serial.available()) {
+    // Read up to 4 chars or until newline
+    char cmdBuf[5] = {0};
+    size_t len = Serial.readBytesUntil('\n', cmdBuf, 4);
+    cmdBuf[len] = '\0';
+    if (strcasecmp(cmdBuf, "cal") == 0 || strcasecmp(cmdBuf, "calibrate") == 0) {
+      Serial.println();  // blank line
+      Serial.print("[Arduino] "); Serial.println(F("🔄 Re‐calibrating IMU..."));
+      performCalibration();
+    }
+  }
+
+  // ─── TIMING: ENSURE ~100 Hz LOOP ─────────────────────────────────────────────
+  uint32_t now = millis();
+  if ((int32_t)(now - nextLoopTime) < 0) {
+    return;  // not yet time for next iteration
+  }
+  nextLoopTime += LOOP_PERIOD_MS;
 
   // ─── 2) READ ADS1015 ADC CHANNELS ───────────────────────────────────────────
   int16_t adc0 = ads1015_2.readADC_SingleEnded(0);
@@ -186,113 +238,96 @@ void loop() {
   int16_t adc4 = ads1015_1.readADC_SingleEnded(3);
 
   // ─── 3) READ & PROCESS IMU ───────────────────────────────────────────────────
-  QMI8658_Data data;
-  float roll=0, pitch=0, yaw=0;
-  float accelMagnitude = 0, gyroMagnitude = 0;
+  float roll = 0, pitch = 0, yaw = 0;
+  float accelMagSq = 0, gyroMagSq = 0;
 
-  bool gotIMU = imu.readSensorData(data);
-  if (gotIMU) {
+  QMI8658_Data d;
+  if (imu.readSensorData(d)) {
     // Apply calibration offsets
-    float accelX = data.accelX - accel_offsetX;
-    float accelY = data.accelY - accel_offsetY;
-    float accelZ = data.accelZ - accel_offsetZ;
+    float ax = d.accelX - accel_offsetX;
+    float ay = d.accelY - accel_offsetY;
+    float az = d.accelZ - accel_offsetZ;
 
-    float gyroX  = data.gyroX  - gyro_offsetX;
-    float gyroY  = data.gyroY  - gyro_offsetY;
-    float gyroZ  = data.gyroZ  - gyro_offsetZ;
+    float gx = d.gyroX  - gyro_offsetX;
+    float gy = d.gyroY  - gyro_offsetY;
+    float gz = d.gyroZ  - gyro_offsetZ;
 
     // Low-pass filter
-    filteredAccelX = alpha * accelX + (1.0f - alpha) * filteredAccelX;
-    filteredAccelY = alpha * accelY + (1.0f - alpha) * filteredAccelY;
-    filteredAccelZ = alpha * accelZ + (1.0f - alpha) * filteredAccelZ;
+    filteredAccelX = alpha * ax + (1.0f - alpha) * filteredAccelX;
+    filteredAccelY = alpha * ay + (1.0f - alpha) * filteredAccelY;
+    filteredAccelZ = alpha * az + (1.0f - alpha) * filteredAccelZ;
 
-    filteredGyroX  = alpha * gyroX  + (1.0f - alpha) * filteredGyroX;
-    filteredGyroY  = alpha * gyroY  + (1.0f - alpha) * filteredGyroY;
-    filteredGyroZ  = alpha * gyroZ  + (1.0f - alpha) * filteredGyroZ;
+    filteredGyroX  = alpha * gx + (1.0f - alpha) * filteredGyroX;
+    filteredGyroY  = alpha * gy + (1.0f - alpha) * filteredGyroY;
+    filteredGyroZ  = alpha * gz + (1.0f - alpha) * filteredGyroZ;
 
-    // Compute orientation
+    // Orientation (roll/pitch/yaw)
     calculateOrientation(
-        filteredAccelX, filteredAccelY, filteredAccelZ,
-        filteredGyroX,  filteredGyroY,  filteredGyroZ,
-        roll, pitch, yaw
+      filteredAccelX, filteredAccelY, filteredAccelZ,
+      filteredGyroX,  filteredGyroY,  filteredGyroZ,
+      roll, pitch, yaw
     );
 
-    // Magnitudes for motion detection
-    accelMagnitude = sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ);
-    gyroMagnitude  = sqrt(gyroX*gyroX   + gyroY*gyroY   + gyroZ*gyroZ);
+    // Compute squared magnitudes (using raw, unfiltered a/g for motion check)
+    accelMagSq = ax*ax + ay*ay + az*az;
+    gyroMagSq  = gx*gx + gy*gy + gz*gz;
 
-    checkMotion(accelMagnitude, gyroMagnitude);
-  } else {
-    // If IMU read fails, keep previous filtered values and motion state
-    // (you could print a warning if desired)
+    checkMotionSq(accelMagSq, gyroMagSq);
   }
+  // else: if IMU read fails, keep last filtered values & motion state
 
-  // ─── 4) CHECK FOR “cal” COMMAND TO RE-CALIBRATE ───────────────────────────────
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    if (command.equalsIgnoreCase("cal") || command.equalsIgnoreCase("calibrate")) {
-      Serial.println();
-      Serial.println("🔄 Re-calibrating IMU...");
-      performCalibration();
-    }
+  // ─── 4) BATCHED CSV PRINT ────────────────────────────────────────────────────
+  // Format:
+  // Time(ms),Motion,Roll,Pitch,Yaw,
+  // fAccX,fAccY,fAccZ,fGyroX,fGyroY,fGyroZ,
+  // ADC0,ADC1,ADC2,ADC3,ADC4
+  static char outBuf[200];
+  int n = snprintf(outBuf, sizeof(outBuf),
+    "%lu,%d,%.2f,%.2f,%.2f,"   // now, motion, roll, pitch, yaw
+    "%.4f,%.4f,%.4f,"         // filteredAccelX, filteredAccelY, filteredAccelZ
+    "%.4f,%.4f,%.4f,"         // filteredGyroX, filteredGyroY, filteredGyroZ
+    "%d,%d,%d,%d,%d",         // ADC0, ADC1, ADC2, ADC3, ADC4
+    now,
+    (motionDetected ? 1 : 0),
+    roll, pitch, yaw,
+    filteredAccelX, filteredAccelY, filteredAccelZ,
+    filteredGyroX, filteredGyroY, filteredGyroZ,
+    adc0, adc1, adc2, adc3, adc4
+  );
+  if (n > 0) {
+    Serial.print("[Sensor] ");
+    Serial.println(outBuf);
   }
-
-  // ─── 5) PRINT A CSV LINE: TimeSinceStart,Motion,Roll,Pitch,Yaw,AccelMag,GyroMag,ADC0..ADC4 ───
-  unsigned long nowMs = millis();
-  Serial.print(nowMs); Serial.print(",");
-  Serial.print(motionDetected); Serial.print(",");
-  
-  Serial.print(roll,  6); Serial.print(",");
-  Serial.print(pitch, 6); Serial.print(",");
-  Serial.print(yaw,   6); Serial.print(",");
-
-  Serial.print(filteredAccelX, 6); Serial.print(",");
-  Serial.print(filteredAccelY, 6); Serial.print(",");
-  Serial.print(filteredAccelZ, 6); Serial.print(",");
-  Serial.print(filteredGyroX, 6); Serial.print(",");
-  Serial.print(filteredGyroY, 6); Serial.print(",");
-  Serial.print(filteredGyroZ, 6); Serial.print(",");
-
-  Serial.print(accelMagnitude, 6); Serial.print(",");
-  Serial.print(gyroMagnitude,  6); Serial.print(",");
-
-  Serial.print(adc0); Serial.print(",");
-  Serial.print(adc1); Serial.print(",");
-  Serial.print(adc2); Serial.print(",");
-  Serial.print(adc3); Serial.print(",");
-  Serial.print(adc4);
-  Serial.println();
-
-  delay(10);  // 10 Hz loop
+  delay(10);
 }
 
-// ─── CALLBACK: WHEN SNTP SYNC FINISHES, UPDATE RTC ─────────────────────────────
-// void timeSyncCallback(struct timeval *tv) {
-//   Serial.println("⏰ Time synced via NTP. Writing to PCF8563 RTC...");
-//   rtc.hwClockWrite();
-// }
 
 // ─── PERFORM IMU CALIBRATION ─────────────────────────────────────────────────────
 void performCalibration() {
   Serial.println();
-  Serial.println("🎯 Starting IMU calibration...");
-  Serial.println("Place sensor flat and still. Cal will start in 3 sec...");
-  for (int i = 3; i > 0; i--) {
-    Serial.print(i);
-    Serial.println("...");
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│           🎯 Starting IMU calibration            │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+  delay(3000);
+  // Serial.println();
+  // Serial.print("[Arduino] "); Serial.println(F("🎯 Starting IMU calibration..."));
+  Serial.print("[Arduino] "); Serial.println(F("Place sensor flat and still. Cal will start in 5 sec..."));
+  for (int i = 5; i > 0; i--) {
+    Serial.print("[Arduino] "); Serial.print(i); Serial.println(F("..."));
     delay(1000);
   }
 
-  const int numSamples = 1000;
+  const int numSamples = 500;  // reduced to speed up calibration
   float sumAx = 0, sumAy = 0, sumAz = 0;
   float sumGx = 0, sumGy = 0, sumGz = 0;
   int   validSamples = 0;
 
-  Serial.print("📈 Collecting ");
+  Serial.print("[Arduino] "); Serial.print(F("📈 Collecting "));
   Serial.print(numSamples);
-  Serial.println(" samples:");
+  Serial.println(F(" samples:"));
 
+  Serial.print("[Arduino] ");
   for (int i = 0; i < numSamples; i++) {
     QMI8658_Data d;
     if (imu.readSensorData(d)) {
@@ -306,17 +341,18 @@ void performCalibration() {
 
       validSamples++;
     }
-    if (i % 100 == 0) {
-      Serial.print(".");
+    if ((i & 0x7F) == 0) {
+      // print a dot every 128 samples to save serial overhead
+      Serial.print(F("."));
     }
-    delay(10);
+    delay(5);  // slightly shorter delay to speed up
   }
   Serial.println();
 
   if (validSamples > 0) {
     accel_offsetX = sumAx / validSamples;
     accel_offsetY = sumAy / validSamples;
-    accel_offsetZ = (sumAz / validSamples) - 9.81f;  // remove gravity
+    accel_offsetZ = (sumAz / validSamples) - GRAVITY;  // remove gravity
 
     gyro_offsetX = sumGx / validSamples;
     gyro_offsetY = sumGy / validSamples;
@@ -324,22 +360,23 @@ void performCalibration() {
 
     calibrated = true;
 
-    Serial.println("✅ Calibration complete!");
-    Serial.print("   Accel offsets (m/s²): ");
-    Serial.print(accel_offsetX, 3); Serial.print(", ");
-    Serial.print(accel_offsetY, 3); Serial.print(", ");
+    Serial.print("[Arduino] "); Serial.println(F("✅ Calibration complete!"));
+    Serial.print("[Arduino] "); Serial.print(F("   Accel offsets (m/s²): "));
+    Serial.print(accel_offsetX, 3); Serial.print(F(", "));
+    Serial.print(accel_offsetY, 3); Serial.print(F(", "));
     Serial.println(accel_offsetZ, 3);
 
-    Serial.print("   Gyro offsets (deg/s):  ");
-    Serial.print(gyro_offsetX, 3);  Serial.print(", ");
-    Serial.print(gyro_offsetY, 3);  Serial.print(", ");
+    Serial.print("[Arduino] "); Serial.print(F("   Gyro offsets (deg/s):  "));
+    Serial.print(gyro_offsetX, 3);  Serial.print(F(", "));
+    Serial.print(gyro_offsetY, 3);  Serial.print(F(", "));
     Serial.println(gyro_offsetZ, 3);
 
-    Serial.println("Type 'cal' anytime to recalibrate.");
+    Serial.print("[Arduino] "); Serial.println(F("Type 'calibration' anytime to recalibrate."));
   } else {
-    Serial.println("❌ Calibration FAILED. No valid samples collected.");
+    Serial.print("[Arduino] "); Serial.println(F("❌ Calibration FAILED. No valid samples collected."));
   }
 }
+
 
 // ─── COMPUTE ROLL, PITCH, YAW ───────────────────────────────────────────────────
 void calculateOrientation(float ax, float ay, float az,
@@ -348,40 +385,46 @@ void calculateOrientation(float ax, float ay, float az,
 {
   // Roll  = atan2(y, sqrt(x² + z²))
   // Pitch = atan2(-x, sqrt(y² + z²))
-  roll  = atan2f(ay, sqrtf(ax*ax + az*az)) * 180.0f / M_PI;
-  pitch = atan2f(-ax, sqrtf(ay*ay + az*az)) * 180.0f / M_PI;
+  roll  = atan2f(ay, sqrtf(ax*ax + az*az)) * 180.0f / PI;
+  pitch = atan2f(-ax, sqrtf(ay*ay + az*az)) * 180.0f / PI;
 
-  // Simple yaw integration (deg/s * dt)
+  // Yaw: simple integration of gz (deg/s * dt)
   static float yawInt   = 0;
-  static unsigned long lastTime = 0;
+  static uint32_t lastT = 0;
 
-  unsigned long t = millis();
-  if (lastTime > 0) {
-    float dt = (t - lastTime) / 1000.0f;  // in seconds
-    yawInt += gz * dt;                   // gz is already in deg/s
+  uint32_t t = millis();
+  if (lastT != 0) {
+    float dt = (t - lastT) * 0.001f;  // seconds
+    yawInt += gz * dt;
   }
-  lastTime = t;
+  lastT = t;
 
-  // Keep yaw in [-180, +180]
+  // Wrap into [-180, 180]
+  if (yawInt >  180.0f) yawInt -= 360.0f;
+  if (yawInt < -180.0f) yawInt += 360.0f;
   yaw = yawInt;
-  while (yaw >  180.0f) yaw -= 360.0f;
-  while (yaw < -180.0f) yaw += 360.0f;
 }
 
-// ─── SIMPLE MOTION DETECTION ───────────────────────────────────────────────────
-void checkMotion(float accelMag, float gyroMag) {
-  // Compare |accel| to 9.81 ± threshold, or check gyro rate
-  float accelDev = fabsf(accelMag - 9.81f);
-  if (accelDev > accelThreshold || gyroMag > gyroThreshold) {
+
+// ─── SIMPLE MOTION DETECTION (SQUARED) ─────────────────────────────────────────
+void checkMotionSq(float accelMagSq, float gyroMagSq) {
+  // Compare |accel| ≈ 9.81 ± threshold, but squared:
+  bool accelMotion = (accelMagSq > highSq) || (accelMagSq < lowSq);
+  bool gyroMotion  = (gyroMagSq  > gyroThSq);
+
+  if (accelMotion || gyroMotion) {
     if (!motionDetected) {
-      // Serial.println("🚶 Motion detected!");
+      // Uncomment if you want a console message on start:
+      // Serial.print("[Arduino] "); Serial.println(F("🚶 Motion detected!"));
     }
     motionDetected   = true;
     lastMotionTime   = millis();
-  } else {
-    // If no motion for >2 sec, reset flag
-    if (motionDetected && (millis() - lastMotionTime > 2000)) {
-      // Serial.println("🛑 Motion stopped.");
+  }
+  else {
+    // If no motion for >2 sec, clear flag
+    if (motionDetected && ((millis() - lastMotionTime) > 2000U)) {
+      // Uncomment if you want a console message on stop:
+      // Serial.print("[Arduino] "); Serial.println(F("🛑 Motion stopped."));
       motionDetected = false;
     }
   }
