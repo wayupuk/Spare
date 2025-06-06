@@ -21,8 +21,7 @@ column_names = [
     "filtered_accel_x_(m/s²)", "filtered_accel_y_(m/s²)", "filtered_accel_z_(m/s²)",
     "filtered_gyro_x_(rad/s)", "filtered_gyro_y_(rad/s)", "filtered_gyro_z_(rad/s)",
     "accel_magnitude", "gyro_magnitude",
-    "adc0", "adc1", "adc2", "adc3", "adc4",
-    "Label"
+    "adc0", "adc1", "adc2", "adc3", "adc4"
 ]
 
 sensor_data.append(column_names)

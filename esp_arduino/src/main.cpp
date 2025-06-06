@@ -46,6 +46,12 @@ float low_value = 0.0;
 float high_value = 1000.0;
 // ──── SENSOR VARIABLES ──────────────────────────────────────────
 int16_t adc0, adc1, adc2, adc3, adc4;
+int time_count = 0;
+unsigned long start_time = 0;
+unsigned long start_timestamp = 0;
+bool is_timestamp = false;
+float flex_raw_value[5];
+float flex_cal[5];
 
 // Simple low-pass filter state
 static const float alpha = 0.1f;
@@ -75,6 +81,10 @@ void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
                           float &roll, float &pitch, float &yaw);
 void checkMotionSq(float accelMagSq, float gyroMagSq);
+void setTime();
+void checkCommand();
+void wifiSetup();
+// ────────────────────────────────────────────────────────────────────────────────
 
 void setup() {
   // ─── SERIAL & WIRE ───────────────────────────────────────────────────────────
@@ -102,30 +112,7 @@ void setup() {
   Serial.print("[Arduino] "); Serial.println(F("✅ PCF8563 RTC initialized."));
 
   // ─── WI-FI SETUP ─────────────────────────────────────────────────────────────
-  Serial.println();
-  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
-  Serial.print("[Arduino] "); Serial.println(F("│                 Connecting to Wi-Fi:             │"));
-  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
-  Serial.println();
-  // Serial.print("[Arduino] "); Serial.print(F("Connecting to Wi-Fi: "));
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  unsigned long wifiStart = millis();
-  Serial.print("[Arduino] ");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(200);
-    Serial.print(F("."));
-    if (millis() - wifiStart > 10000) {
-      Serial.println();
-      Serial.print("[Arduino] "); Serial.println(F("⚠️  Wi-Fi connect timeout. Retrying..."));
-      wifiStart = millis();
-      WiFi.begin(ssid, password);
-    }
-  }
-  Serial.println();
-  Serial.print("[Arduino] "); Serial.print(F("✅ Connected to Wi-Fi. IP: "));
-  Serial.println(WiFi.localIP());
-
+  wifiSetup();
   // ─── ADS1015 INITIALIZATION ─────────────────────────────────────────────────
   Serial.println();
   Serial.print("[Arduino] "); Serial.println(F("Initializing ADS1015 #1 (0x48)..."));
@@ -172,37 +159,123 @@ void setup() {
   Serial.print("[Arduino] "); Serial.println(F("🔧 QMI8658 sensor configured (8G/512DPS, 1000 Hz)."));
 
   // ─── CALIBRATION ───────────────────────────────────────────────────────────────
-  gyroCalibration();
+  // gyroCalibration();
 
   // ─── HEADER FOR CSV OUTPUT ────────────────────────────────────────────────────
-  // Now includes filteredAccelX,Y,Z and filteredGyroX,Y,Z
   Serial.println();
   Serial.print("[Arduino] "); Serial.println(F("Time(ms),Motion,Roll,Pitch,Yaw,"
                    "fAccX,fAccY,fAccZ,fGyroX,fGyroY,fGyroZ,"
                    "ADC0,ADC1,ADC2,ADC3,ADC4"));
   // Serial.print("[Sensor] "); Serial.println(F("-----------------------------------------------------------------------"));
-
-  // ─── SET INITIAL LOOP TIME ────────────────────────────────────────────────────
-  nextLoopTime = millis();
+  setTime();
 }
 
-int time_count = 0;
-unsigned long start_time = 0;
-bool time_set = false;
-float flex_raw_value[5];
-float flex_cal[5];
 void loop() {
-  if (!(time_set)){
-      start_time = millis();
-      time_set = true;
-  }
   // ─── SERIAL COMMAND HANDLING ────────────────────────────────────────────────
+  checkCommand();
+
+  // ─── 2) READ ADS1015 ADC CHANNELS ───────────────────────────────────────────
+  // adc0 = ads1015_2.readADC_SingleEnded(0);
+  // adc1 = ads1015_1.readADC_SingleEnded(0);
+  // adc2 = ads1015_1.readADC_SingleEnded(1);
+  // adc3 = ads1015_1.readADC_SingleEnded(2);
+  // adc4 = ads1015_1.readADC_SingleEnded(3);
+  flex_raw_value[0] = ads1015_2.readADC_SingleEnded(0);
+  flex_raw_value[1] = ads1015_1.readADC_SingleEnded(0);
+  flex_raw_value[2] = ads1015_1.readADC_SingleEnded(1);
+  flex_raw_value[3] = ads1015_1.readADC_SingleEnded(2);
+  flex_raw_value[4] = ads1015_1.readADC_SingleEnded(3);
+  for (int i = 0; i < 5; i++) {
+    // Apply two-point calibration
+    flex_cal[i] = ((flex_raw_value[i] - mean_acd_low[i]) * (high_value - low_value) / (mean_acd_max[i] - mean_acd_low[i])) + low_value;
+    // Clamp the values within the reference range
+    if (flex_cal[i] < low_value) flex_cal[i] = low_value;
+    if (flex_cal[i] > high_value) flex_cal[i] = high_value;
+  }
+
+  // ─── 3) READ & PROCESS IMU ───────────────────────────────────────────────────
+  float roll = 0, pitch = 0, yaw = 0;
+  float accelMagSq = 0, gyroMagSq = 0;
+
+  QMI8658_Data d;
+  if (imu.readSensorData(d)) {
+    // Apply calibration offsets
+    float ax = d.accelX - accel_offsetX;
+    float ay = d.accelY - accel_offsetY;
+    float az = d.accelZ - accel_offsetZ;
+
+    float gx = d.gyroX  - gyro_offsetX;
+    float gy = d.gyroY  - gyro_offsetY;
+    float gz = d.gyroZ  - gyro_offsetZ;
+
+    // Low-pass filter
+    filteredAccelX = alpha * ax + (1.0f - alpha) * filteredAccelX;
+    filteredAccelY = alpha * ay + (1.0f - alpha) * filteredAccelY;
+    filteredAccelZ = alpha * az + (1.0f - alpha) * filteredAccelZ;
+
+    filteredGyroX  = alpha * gx + (1.0f - alpha) * filteredGyroX;
+    filteredGyroY  = alpha * gy + (1.0f - alpha) * filteredGyroY;
+    filteredGyroZ  = alpha * gz + (1.0f - alpha) * filteredGyroZ;
+
+    // Orientation (roll/pitch/yaw)
+    calculateOrientation(
+      filteredAccelX, filteredAccelY, filteredAccelZ,
+      filteredGyroX,  filteredGyroY,  filteredGyroZ,
+      roll, pitch, yaw
+    );
+
+    // Compute squared magnitudes (using raw, unfiltered a/g for motion check)
+    accelMagSq = ax*ax + ay*ay + az*az;
+    gyroMagSq  = gx*gx + gy*gy + gz*gz;
+
+    checkMotionSq(accelMagSq, gyroMagSq);
+  }
+  // else: if IMU read fails, keep last filtered values & motion state
+
+  // ─── 4) BATCHED CSV PRINT ────────────────────────────────────────────────────
+  // Format:
+  // Time(ms),Motion,Roll,Pitch,Yaw,
+  // fAccX,fAccY,fAccZ,fGyroX,fGyroY,fGyroZ,
+  // ADC0,ADC1,ADC2,ADC3,ADC4
+  static char outBuf[200];
+  int n = snprintf(outBuf, sizeof(outBuf),
+    "%lu,%d,%.2f,%.2f,%.2f,"   // now, motion, roll, pitch, yaw
+    "%.4f,%.4f,%.4f,"         // filteredAccelX, filteredAccelY, filteredAccelZ
+    "%.4f,%.4f,%.4f,"         // filteredGyroX, filteredGyroY, filteredGyroZ
+    "%.4f,%.4f,%.4f,%.4f,%.4f",         // ADC0, ADC1, ADC2, ADC3, ADC4
+    millis() - start_timestamp,
+    (motionDetected ? 1 : 0),
+    roll, pitch, yaw,
+    filteredAccelX, filteredAccelY, filteredAccelZ,
+    filteredGyroX, filteredGyroY, filteredGyroZ,
+    flex_cal[0], flex_cal[1], flex_cal[2], flex_cal[3], flex_cal[4]
+  );
+  if (n > 0) {
+    time_count++;
+    Serial.print("[Sensor] ");
+    Serial.println(outBuf);
+    // Serial.print(outBuf);Serial.print(" time_count:");Serial.print(time_count);
+    // Serial.print("\n");
+  }
+
+  delay(10);
+  // if ((millis() - start_time) >= 1000){
+  //   // Serial.print("[Arduino] ");
+  //   // Serial.print("in 1 s : ");Serial.println(time_count);
+  //   time_count = 0;
+  //   start_time = millis();
+  // }
+}
+
+const int numSamples = 500;  // reduced to speed up calibration
+float sensor_value[5];
+
+void checkCommand(){
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n'); // Read until newline
     command.trim();                                // Remove any trailing CR/LF or spaces
     Serial.print("[Arduino] Received: ");
     Serial.println(command);
-
     if(command == "help"){
       Serial.println();
       Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
@@ -265,6 +338,8 @@ void loop() {
       Serial.print("[Arduino] "); Serial.println("  reset         - Reboot the device");
       Serial.print("[Arduino] "); Serial.println("  gyro_cal      - gyro_Calibration");
       Serial.print("[Arduino] "); Serial.println("  flex_cal      - flex_Calibration");
+      Serial.print("[Arduino] "); Serial.println("  set_time      - reset time");
+      Serial.print("[Arduino] "); Serial.println("  set_wifi      - reset wifi");
     }
     else if (command == "reset") {
       Serial.print("[Arduino] "); Serial.println("➤ Rebooting now…");
@@ -278,124 +353,51 @@ void loop() {
     else if(command == "flex_cal"){
       flexCalibration();
     }
-
+    else if(command == "set_time"){
+      setTime();
+    }
+    else if(command == "set_wifi"){
+      wifiSetup();
+    }
     // … other processing for commands like "cal" below …
-  }
-
-  // // ─── NON-BLOCKING SERIAL CHECK FOR "cal" ────────────────────────────────────
-  // if (Serial.available()) {
-  //   // Read up to 4 chars or until newline
-  //   char cmdBuf[5] = {0};
-  //   size_t len = Serial.readBytesUntil('\n', cmdBuf, 4);
-  //   cmdBuf[len] = '\0';
-  //   if (strcasecmp(cmdBuf, "cal") == 0 || strcasecmp(cmdBuf, "cal") == 0) {
-  //     Serial.println();  // blank line
-  //     Serial.print("[Arduino] "); Serial.println(F("🔄 Re‐calibrating IMU..."));
-  //     gyroCalibration();
-  //   }
-  // }
-
-  // ─── TIMING: ENSURE ~100 Hz LOOP ─────────────────────────────────────────────
-  // uint32_t now = millis();
-  // if ((int32_t)(now - nextLoopTime) < 0) {
-  //   return;  // not yet time for next iteration
-  // }
-  // nextLoopTime += LOOP_PERIOD_MS;
-
-  // ─── 2) READ ADS1015 ADC CHANNELS ───────────────────────────────────────────
-  // adc0 = ads1015_2.readADC_SingleEnded(0);
-  // adc1 = ads1015_1.readADC_SingleEnded(0);
-  // adc2 = ads1015_1.readADC_SingleEnded(1);
-  // adc3 = ads1015_1.readADC_SingleEnded(2);
-  // adc4 = ads1015_1.readADC_SingleEnded(3);
-  flex_raw_value[0] = ads1015_2.readADC_SingleEnded(0);
-  flex_raw_value[1] = ads1015_1.readADC_SingleEnded(0);
-  flex_raw_value[2] = ads1015_1.readADC_SingleEnded(1);
-  flex_raw_value[3] = ads1015_1.readADC_SingleEnded(2);
-  flex_raw_value[4] = ads1015_1.readADC_SingleEnded(3);
-  for (int i = 0; i < 5; i++) {
-    // Apply two-point calibration
-    flex_cal[i] = ((flex_raw_value[i] - mean_acd_low[i]) * (high_value - low_value) / (mean_acd_max[i] - mean_acd_low[i])) + low_value;
-    // Clamp the values within the reference range
-    if (flex_cal[i] < low_value) flex_cal[i] = low_value;
-    if (flex_cal[i] > high_value) flex_cal[i] = high_value;
-  }
-  // ─── 3) READ & PROCESS IMU ───────────────────────────────────────────────────
-  float roll = 0, pitch = 0, yaw = 0;
-  float accelMagSq = 0, gyroMagSq = 0;
-
-  QMI8658_Data d;
-  if (imu.readSensorData(d)) {
-    // Apply calibration offsets
-    float ax = d.accelX - accel_offsetX;
-    float ay = d.accelY - accel_offsetY;
-    float az = d.accelZ - accel_offsetZ;
-
-    float gx = d.gyroX  - gyro_offsetX;
-    float gy = d.gyroY  - gyro_offsetY;
-    float gz = d.gyroZ  - gyro_offsetZ;
-
-    // Low-pass filter
-    filteredAccelX = alpha * ax + (1.0f - alpha) * filteredAccelX;
-    filteredAccelY = alpha * ay + (1.0f - alpha) * filteredAccelY;
-    filteredAccelZ = alpha * az + (1.0f - alpha) * filteredAccelZ;
-
-    filteredGyroX  = alpha * gx + (1.0f - alpha) * filteredGyroX;
-    filteredGyroY  = alpha * gy + (1.0f - alpha) * filteredGyroY;
-    filteredGyroZ  = alpha * gz + (1.0f - alpha) * filteredGyroZ;
-
-    // Orientation (roll/pitch/yaw)
-    calculateOrientation(
-      filteredAccelX, filteredAccelY, filteredAccelZ,
-      filteredGyroX,  filteredGyroY,  filteredGyroZ,
-      roll, pitch, yaw
-    );
-
-    // Compute squared magnitudes (using raw, unfiltered a/g for motion check)
-    accelMagSq = ax*ax + ay*ay + az*az;
-    gyroMagSq  = gx*gx + gy*gy + gz*gz;
-
-    checkMotionSq(accelMagSq, gyroMagSq);
-  }
-  // else: if IMU read fails, keep last filtered values & motion state
-
-  // ─── 4) BATCHED CSV PRINT ────────────────────────────────────────────────────
-  // Format:
-  // Time(ms),Motion,Roll,Pitch,Yaw,
-  // fAccX,fAccY,fAccZ,fGyroX,fGyroY,fGyroZ,
-  // ADC0,ADC1,ADC2,ADC3,ADC4
-  static char outBuf[200];
-  int n = snprintf(outBuf, sizeof(outBuf),
-    "%lu,%d,%.2f,%.2f,%.2f,"   // now, motion, roll, pitch, yaw
-    "%.4f,%.4f,%.4f,"         // filteredAccelX, filteredAccelY, filteredAccelZ
-    "%.4f,%.4f,%.4f,"         // filteredGyroX, filteredGyroY, filteredGyroZ
-    "%.4f,%.4f,%.4f,%.4f,%.4f",         // ADC0, ADC1, ADC2, ADC3, ADC4
-    millis() - start_time,
-    (motionDetected ? 1 : 0),
-    roll, pitch, yaw,
-    filteredAccelX, filteredAccelY, filteredAccelZ,
-    filteredGyroX, filteredGyroY, filteredGyroZ,
-    flex_cal[0], flex_cal[1], flex_cal[2], flex_cal[3], flex_cal[4]
-  );
-  if (n > 0) {
-    time_count++;
-    Serial.print("[Sensor] ");
-    Serial.println(outBuf);
-    // Serial.print(outBuf);Serial.print(" time_count:");Serial.print(time_count);
-    // Serial.print("\n");
-  }
-
-  delay(10);
-  if ((millis() - start_time) >= 1000){
-    // Serial.print("[Arduino] ");
-    // Serial.print("in 1 s : ");Serial.println(time_count);
-    time_count = 0;
-    start_time = millis();
   }
 }
 
-const int numSamples = 500;  // reduced to speed up calibration
-float sensor_value[5];
+void wifiSetup(){
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│                 Connecting to Wi-Fi:             │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+  // Serial.print("[Arduino] "); Serial.print(F("Connecting to Wi-Fi: "));
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  unsigned long wifiStart = millis();
+  Serial.print("[Arduino] ");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.print(F("."));
+    if (millis() - wifiStart > 10000) {
+      Serial.println();
+      Serial.print("[Arduino] "); Serial.println(F("⚠️  Wi-Fi connect timeout. Retrying..."));
+      wifiStart = millis();
+      WiFi.begin(ssid, password);
+    }
+  }
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.print(F("✅ Connected to Wi-Fi. IP: "));
+  Serial.println(WiFi.localIP());
+}
+
+void setTime(){
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│                      SetTime                     │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+
+  start_timestamp = millis();
+}
 
 // ─── PERFORM Flex CALIBRATION ─────────────────────────────────────────────────────
 void flexCalibration() {
@@ -466,7 +468,6 @@ void flexCalibration() {
 
   Serial.println(F("[Arduino] ✅ Calibration complete."));
 }
-
 
 float sumAx = 0, sumAy = 0, sumAz = 0;
 float sumGx = 0, sumGy = 0, sumGz = 0;
@@ -542,8 +543,6 @@ void gyroCalibration() {
     Serial.print("[Arduino] "); Serial.println(F("❌ Calibration FAILED. No valid samples collected."));
   }
 }
-
-
 // ─── COMPUTE ROLL, PITCH, YAW ───────────────────────────────────────────────────
 void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
@@ -570,8 +569,6 @@ void calculateOrientation(float ax, float ay, float az,
   if (yawInt < -180.0f) yawInt += 360.0f;
   yaw = yawInt;
 }
-
-
 // ─── SIMPLE MOTION DETECTION (SQUARED) ─────────────────────────────────────────
 void checkMotionSq(float accelMagSq, float gyroMagSq) {
   // Compare |accel| ≈ 9.81 ± threshold, but squared:
