@@ -77,6 +77,7 @@ uint32_t nextLoopTime = 0;
 // ──── PROTOTYPES ────────────────────────────────────────────────────────────────
 void flexCalibration();
 void gyroCalibration();
+void fullCalibration();
 void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
                           float &roll, float &pitch, float &yaw);
@@ -338,6 +339,7 @@ void checkCommand(){
       Serial.print("[Arduino] "); Serial.println("  reset         - Reboot the device");
       Serial.print("[Arduino] "); Serial.println("  gyro_cal      - gyro_Calibration");
       Serial.print("[Arduino] "); Serial.println("  flex_cal      - flex_Calibration");
+      Serial.print("[Arduino] "); Serial.println("  full_cal      - full_Calibration");
       Serial.print("[Arduino] "); Serial.println("  set_time      - reset time");
       Serial.print("[Arduino] "); Serial.println("  set_wifi      - reset wifi");
     }
@@ -358,6 +360,9 @@ void checkCommand(){
     }
     else if(command == "set_wifi"){
       wifiSetup();
+    }
+    else if(command == "full_cal"){
+      fullCalibration();
     }
     // … other processing for commands like "cal" below …
   }
@@ -543,6 +548,17 @@ void gyroCalibration() {
     Serial.print("[Arduino] "); Serial.println(F("❌ Calibration FAILED. No valid samples collected."));
   }
 }
+void fullCalibration() {
+  Serial.println();
+  Serial.print("[Arduino] "); Serial.println(F("┌──────────────────────────────────────────────────┐"));
+  Serial.print("[Arduino] "); Serial.println(F("│           🎯Starting Full calibration            │"));
+  Serial.print("[Arduino] "); Serial.println(F("└──────────────────────────────────────────────────┘"));
+  Serial.println();
+  delay(3000);
+  gyroCalibration();
+  flexCalibration();
+}
+
 // ─── COMPUTE ROLL, PITCH, YAW ───────────────────────────────────────────────────
 void calculateOrientation(float ax, float ay, float az,
                           float gx, float gy, float gz,
