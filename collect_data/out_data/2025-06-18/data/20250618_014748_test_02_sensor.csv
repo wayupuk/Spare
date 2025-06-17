@@ -1,0 +1,2 @@
+timestamp_ms,motion_detected,roll_deg,pitch_deg,yaw_deg,filtered_accel_x_(m/s²),filtered_accel_y_(m/s²),filtered_accel_z_(m/s²),filtered_gyro_x_(deg/s),filtered_gyro_y_(deg/s),filtered_gyro_z_(deg/s),accel_magnitude,gyro_magnitude,adc0,adc1,adc2,adc3,adc4,Label
+226221,-0.1718,0.0800,0.0678,0.2789,1.2396,-9.7453,1.7825,7.2846,172.4982,0.0000,0.0000,0.0000,0.0000,0.0000,nothing
