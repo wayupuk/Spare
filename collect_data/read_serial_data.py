@@ -1,3 +1,4 @@
+from itertools import count
 import threading
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, font as tkfont, ttk
@@ -46,7 +47,7 @@ COLUMN_NAMES = [
     "timestamp_ms",
     "gyro_x", "gyro_y", "gyro_z",
     "accel_x", "accel_y", "accel_z",
-    "roll", "pitch", "yaw",
+    "angle_x", "angle_y", "angle_z",
     "adc0", "adc1", "adc2", "adc3", "adc4",
     "Label"
 ]
@@ -68,8 +69,8 @@ class SerialGUI:
         self.output_filename_base: str | None = None
         self.current_session_date: str | None = None
         self.video_writer = None
-        self.last_timestamp_ms: str | None = None 
-
+        self.last_timestamp_ms: str | None = None
+        self.count_sample: int = 0
         # --- Labeling & UI State ---
         self.original_labels_list = SELECTABLE_LABELS_LIST[:]
         self.current_grouped_labels_list: list[str] = []
@@ -78,6 +79,7 @@ class SerialGUI:
         self.current_selected_grouped_label_var = tk.StringVar()
         self.active_individual_components_list: list[str] = []
         self.current_normal_mode_component_idx: int = 0
+        self.normal_mode_completed_cycles: int = 0
         self.labeling_is_active: bool = False
         self.current_continuous_label: str = DEFAULT_UNLABELED_VALUE
         self.last_label_start_index: int = 0
@@ -101,9 +103,9 @@ class SerialGUI:
         self.cv_thai_font_large = None
         self.cv_thai_font_cooldown = None
         self._load_fonts()
-        
+
         self._create_gui_elements()
-        
+
         self.update_label_grouping()
         self.update_image()
         self._update_ui_element_states()
@@ -122,7 +124,7 @@ class SerialGUI:
             print("Warning: THAI_FONT_PATH is not set.")
 
     def _create_gui_elements(self):
-        self.master.rowconfigure(4, weight=1) 
+        self.master.rowconfigure(4, weight=1)
         self.master.columnconfigure(0, weight=1)
         self.text_font = tkfont.Font(family=FONT_FAMILY, size=FONT_SIZE_TEXT)
         self.entry_font = tkfont.Font(family=FONT_FAMILY, size=FONT_SIZE_ENTRY)
@@ -159,7 +161,7 @@ class SerialGUI:
         self.label_combo = ttk.Combobox(label_frame, textvariable=self.current_selected_grouped_label_var, values=[], state='readonly')
         self.label_combo.grid(row=0, column=2, sticky="we", padx=5, pady=5)
         self.label_combo.bind("<<ComboboxSelected>>", self._on_grouped_label_selected)
-        
+
         custom_label_frame = ttk.Labelframe(self.master, text="Custom Label Set")
         custom_label_frame.grid(row=2, column=0, columnspan=2, sticky="we", padx=10, pady=5)
         custom_label_frame.columnconfigure(0, weight=1)
@@ -172,7 +174,7 @@ class SerialGUI:
         self.update_labels_button = ttk.Button(custom_label_frame, text="Update Labels", command=self._update_custom_labels)
         self.update_labels_button.grid(row=0, column=1, padx=5, pady=5)
 
-        random_mode_frame = ttk.Labelframe(self.master, text="Random Mode")
+        random_mode_frame = ttk.Labelframe(self.master, text="Setting")
         random_mode_frame.grid(row=3, column=0, columnspan=2, sticky="we", padx=10, pady=5)
         random_mode_frame.columnconfigure(3, weight=1)
         tk.Label(random_mode_frame, text="Count per Label:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
@@ -263,13 +265,13 @@ class SerialGUI:
         if isinstance(focused_widget, ttk.Entry):
             return
         self.toggle_record()
-    
+
     def on_d_key_press(self, event=None):
         focused_widget = self.master.focus_get()
         if isinstance(focused_widget, ttk.Entry):
             return
         self.on_error_button_press()
-    
+
     def _update_ui_element_states(self):
         can_flag_error = self.record and self.labeling_is_active and not self.is_in_redo_cooldown and not self.is_in_break_cooldown
         self.error_button.config(state=tk.NORMAL if can_flag_error else tk.DISABLED)
@@ -325,35 +327,35 @@ class SerialGUI:
             self._handle_random_mode_s_key()
         else:
             self._handle_normal_mode_s_key()
-        
+
         self._update_ui_element_states()
         if focused_widget == self.label_combo: return "break"
         return None
 
     def on_error_button_press(self):
         can_flag_error = self.record and self.labeling_is_active and not self.is_in_redo_cooldown and not self.is_in_break_cooldown
-        
+
         if not can_flag_error:
             if self.record and self.labeling_is_active:
                  self._append_to_top("[Warning] Cannot flag error during a cooldown.\n")
             else:
                  self._append_to_top("[Warning] Can only flag an error while actively labeling.\n")
             return
-            
+
         failed_label = self.current_continuous_label
         num_relabeled = 0
         for i in range(self.last_label_start_index, len(self.sensor_data)):
             self.sensor_data[i][-1] = REDO_FLAG_LABEL
             num_relabeled += 1
         self._append_to_top(f"[REDO] Attempt for '{failed_label}' flagged. {num_relabeled} data points relabeled to '{REDO_FLAG_LABEL}'.\n")
-        
+
         self.labeling_is_active = False
         self.current_continuous_label = DEFAULT_UNLABELED_VALUE
-        
+
         self.is_in_redo_cooldown = True
         self.cooldown_end_time = time.time() + REDO_COOLDOWN_S
         self._append_to_top(f"[Info] Starting {REDO_COOLDOWN_S}s error cooldown.\n")
-        
+
         self._update_ui_element_states()
 
     def _start_break_cooldown(self):
@@ -361,7 +363,7 @@ class SerialGUI:
             break_duration = self.break_time_var.get()
         except tk.TclError:
             break_duration = 0
-        
+
         if break_duration > 0:
             self.is_in_break_cooldown = True
             self.cooldown_end_time = time.time() + break_duration
@@ -381,7 +383,7 @@ class SerialGUI:
             if self.random_sequence_running:
                 self._execute_stop_random_mode()
         self._update_ui_element_states()
-        
+
     def _draw_text_with_bg(self, draw_ctx, text, pos, font, color, bg_color=(0,0,0,128)):
         if not font or not draw_ctx: return
         try:
@@ -410,7 +412,7 @@ class SerialGUI:
         global pil_image
         pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
         draw_ctx = ImageDraw.Draw(pil_image)
-        
+
         y_offset = 10
         self._draw_text_with_bg(draw_ctx, f"RECORDING: {self.record}", (10, y_offset), self.cv_thai_font_small, (0, 255, 0) if self.record else (255, 255, 0))
         y_offset += 30
@@ -418,12 +420,15 @@ class SerialGUI:
         if self.last_timestamp_ms is not None:
             self._draw_text_with_bg(draw_ctx, f"Timestamp: {self.last_timestamp_ms} ms", (10, y_offset), self.cv_thai_font_small, (255, 255, 255))
             y_offset += 30
-        
+
+            self._draw_text_with_bg(draw_ctx, f"sample: {self.count_sample}", (10, y_offset), self.cv_thai_font_small, (255, 255, 255))
+            y_offset += 30
+
         # --- HYBRID DISPLAY LOGIC ---
         effective_label = self._get_current_effective_label()
-        label_color = (255, 255, 255) 
+        label_color = (255, 255, 255)
         if self.labeling_is_active:
-            label_color = (0, 255, 255) 
+            label_color = (0, 255, 255)
         elif self.is_in_break_cooldown or self.is_in_redo_cooldown:
             label_color = (255, 255, 0)
         self._draw_text_with_bg(draw_ctx, f"CURRENT LABEL: {effective_label}", (10, y_offset), self.cv_thai_font_large, label_color)
@@ -487,17 +492,22 @@ class SerialGUI:
             self.image_label.configure(image=imgtk)
 
         self.master.after(30, self.update_image)
-        
+
     def _process_serial_data(self, line: str):
         if line.startswith("[Sensor]"):
             self._append_to_bottom(line + '\n')
             sensor_values_str = line.replace("[Sensor]", "").strip()
             readings = sensor_values_str.split(',')
-            
+
             if readings and readings[0]:
                 self.last_timestamp_ms = readings[0]
 
             if self.record:
+                if self.labeling_is_active:
+                    self.count_sample += 1
+                else:
+                    self.count_sample = 0
+
                 if len(readings) == len(COLUMN_NAMES) - 1:
                     current_label = self._get_current_effective_label()
                     self.sensor_data.append(readings + [current_label])
@@ -522,21 +532,22 @@ class SerialGUI:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_filename = re.sub(r'[^\w\-.]+', '', user_filename.replace(" ", "_")) if user_filename else "session"
             self.output_filename_base = f"{timestamp}_{safe_filename}"
-            
+
             self.sensor_data.clear()
             self.labeling_is_active = False
             self.current_continuous_label = DEFAULT_UNLABELED_VALUE
-            
+            self.normal_mode_completed_cycles = 0 # Reset cycle count for new recording
+
             # --- FIX: Immediately start random sequence if mode is active ---
             if self.random_labeling_mode_active.get():
                 if not self._try_start_random_sequence_run():
-                    self.output_filename_base = None 
+                    self.output_filename_base = None
                     self._append_to_top("[Error] Could not start random sequence. Aborting record.\n")
                     return
 
             video_path = os.path.join(video_dir, f"{self.output_filename_base}.mp4")
             self.master.after(BOARD_RESET_DELAY_MS, lambda: self._finalize_recording_start(video_path))
-        
+
         else:
             self.record = False
             if self.is_in_redo_cooldown or self.is_in_break_cooldown:
@@ -554,7 +565,7 @@ class SerialGUI:
                 self._append_to_top(f"[Info] Video stopped: {self.output_filename_base}.mp4\n")
             self._save_sensor_data()
             self.output_filename_base = None
-        
+
         self.record_button.config(text="Stop Recording (a)" if self.record else "Record (a)")
         self.filename_entry.config(state=tk.DISABLED if self.record else tk.NORMAL)
         self._update_ui_element_states()
@@ -566,24 +577,65 @@ class SerialGUI:
         self.label_combo.config(state=combo_state)
         self.random_label_count_entry.config(state=new_state)
         self.break_time_entry.config(state=new_state)
-    
+
+
     def _handle_normal_mode_s_key(self):
         if not self.active_individual_components_list:
             self._append_to_top("[Warning] No labels in the selected set. Choose a set first.\n")
             return
+
+        try:
+            # In normal mode, this UI value is interpreted as the number of cycles to complete.
+            total_cycles_to_run = self.random_label_count_var.get()
+            if total_cycles_to_run <= 0:
+                self._append_to_top("[Error] 'Count' value in settings must be a positive number.\n")
+                return
+        except tk.TclError:
+            self._append_to_top("[Error] Invalid 'Count' value in settings. Please enter a number.\n")
+            return
+
+        # Check if all cycles have already been completed for this session.
+        if self.normal_mode_completed_cycles >= total_cycles_to_run:
+            self._append_to_top(f"[Info] All {total_cycles_to_run} cycles are complete. To start over, change the label set or restart recording.\n")
+            return
+
         if not self.labeling_is_active:
+            # --- STARTING a new label ---
             target_label = self.active_individual_components_list[self.current_normal_mode_component_idx]
             self.current_continuous_label = target_label
             self.labeling_is_active = True
             self.last_label_start_index = len(self.sensor_data)
-            self._append_to_top(f"[Labeling STARTED] Applying '{target_label}'.\n")
+
+            progress_in_cycle = self.current_normal_mode_component_idx + 1
+            total_in_cycle = len(self.active_individual_components_list)
+            current_cycle = self.normal_mode_completed_cycles + 1
+            self._append_to_top(
+                f"[Labeling STARTED] Applying '{target_label}' ({progress_in_cycle}/{total_in_cycle}) | Cycle {current_cycle}/{total_cycles_to_run}\n"
+            )
         else:
+            # --- STOPPING the current label ---
             stopped_label = self.current_continuous_label
             self.labeling_is_active = False
             self.current_continuous_label = DEFAULT_UNLABELED_VALUE
             self._append_to_top(f"[Labeling STOPPED] Was applying '{stopped_label}'.\n")
-            self.current_normal_mode_component_idx = (self.current_normal_mode_component_idx + 1) % len(self.active_individual_components_list)
-            self._start_break_cooldown()
+
+            # Advance the index to the next label for the next 'start' press.
+            self.current_normal_mode_component_idx += 1
+
+            # Check if the cycle is complete.
+            if self.current_normal_mode_component_idx >= len(self.active_individual_components_list):
+                self.normal_mode_completed_cycles += 1
+                self.current_normal_mode_component_idx = 0  # Reset for the next cycle.
+                self._append_to_top(f"[Info] Cycle {self.normal_mode_completed_cycles}/{total_cycles_to_run} complete!\n")
+
+                if self.normal_mode_completed_cycles >= total_cycles_to_run:
+                    self._append_to_top("[Info] All normal mode labeling cycles finished for this set.\n")
+                    # Don't start a break, the session is over.
+                else:
+                    self._start_break_cooldown()  # Start a break between cycles.
+            else:
+                # The cycle is not over, start a break before the next item.
+                self._start_break_cooldown()
 
     def _handle_random_mode_s_key(self):
         is_finished = self.current_random_label_index >= self.total_random_labels_in_sequence
@@ -667,7 +719,7 @@ class SerialGUI:
         if group_size == 1:
             self.current_grouped_labels_list = self.original_labels_list[:]
         else:
-            self.current_grouped_labels_list = [GROUPED_LABEL_SEPARATOR.join(self.original_labels_list[i:i + group_size]) 
+            self.current_grouped_labels_list = [GROUPED_LABEL_SEPARATOR.join(self.original_labels_list[i:i + group_size])
                                                 for i in range(0, len(self.original_labels_list), group_size)]
         self.label_combo['values'] = self.current_grouped_labels_list
         self.current_selected_grouped_label_var.set(self.current_grouped_labels_list[0] if self.current_grouped_labels_list else "")
@@ -688,8 +740,10 @@ class SerialGUI:
         self.active_individual_components_list = [
             comp.strip() for comp in selected_group.split(GROUPED_LABEL_SEPARATOR) if comp.strip()
         ]
+        # Reset normal mode progress whenever the label set is changed.
         self.current_normal_mode_component_idx = 0
-        self._append_to_top(f"[Info] Active set: '{selected_group or 'None'}'. Components: {self.active_individual_components_list}\n")
+        self.normal_mode_completed_cycles = 0
+        self._append_to_top(f"[Info] Active set: '{selected_group or 'None'}'. Components: {self.active_individual_components_list}. Normal mode progress reset.\n")
         self._update_ui_element_states()
 
     def refresh_ports(self):

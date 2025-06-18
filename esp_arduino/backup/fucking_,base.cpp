@@ -217,7 +217,7 @@ void loop() {
   // Serial.printf("%s\n", outBuf);
   Serial.printf("[Sensor] %s\n", outBuf);
 
-  delay(10); // Simple delay to control loop rate (~100Hz attempt, actual rate depends on processing time + this delay)
+  delay(100); // Simple delay to control loop rate (~100Hz attempt, actual rate depends on processing time + this delay)
 }
 
 // -----------------------------------------------------------------------------
