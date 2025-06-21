@@ -5,10 +5,10 @@
 #define COMMON_DATA_H
 #include <stdint.h>
 struct SensorData {
-  uint32_t timestampMs; uint8_t motionDetected; float roll; float pitch; float yaw;
-  float filteredAccelX; float filteredAccelY; float filteredAccelZ;
-  float filteredGyroX; float filteredGyroY; float filteredGyroZ;
-  float accelMagSq; float gyroMagSq; float flex_cal[5];
+  float gx, gy, gz;
+  float ax, ay, az;
+  float angle_x, angle_y, angle_z;
+  float flex_cal[5];
 };
 #endif // COMMON_DATA_H
 // --- End of SensorData struct definition ---
@@ -20,6 +20,8 @@ unsigned long start_timestamp = 0;
 BLEService customService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic dataCharacteristic("19B10003-E8F2-537E-4F6C-D104768A1214", // UUID for raw data
                                      BLERead | BLENotify, sizeof(SensorData));
+
+BLEDevice central;
 
 const char* deviceName = "RawSensorDataProvider";
 

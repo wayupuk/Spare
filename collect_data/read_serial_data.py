@@ -43,12 +43,29 @@ SELECTABLE_LABELS_LIST = [
 ]
 GROUPED_LABEL_SEPARATOR = "_"
 
+# columns = [
+#     "timestamp",
+#     "ax_slav", "ay_slav", "az_slav",
+#     "gx_slav", "gy_slav", "gz_slav",
+#     "angle_x_slav", "angle_y_slav", "angle_z_slav",
+#     "flex_slav_0", "flex_slav_1", "flex_slav_2", "flex_slav_3", "flex_slav_4",
+#     "ax", "ay", "az",
+#     "gx", "gy", "gz",
+#     "angle_x", "angle_y", "angle_z",
+#     "flex_0", "flex_1", "flex_2", "flex_3", "flex_4"
+# ]
+
+
 COLUMN_NAMES = [
     "timestamp_ms",
-    "gyro_x", "gyro_y", "gyro_z",
-    "accel_x", "accel_y", "accel_z",
+    "ax_slav", "ay_slav", "az_slav",
+    "gx_slav", "gy_slav", "gz_slav",
+    "angle_x_slav", "angle_y_slav", "angle_z_slav",
+    "flex_slav_0", "flex_slav_1", "flex_slav_2", "flex_slav_3", "flex_slav_4",
+    "ax", "ay", "az",
+    "gx", "gy", "gz",
     "angle_x", "angle_y", "angle_z",
-    "adc0", "adc1", "adc2", "adc3", "adc4",
+    "flex_0", "flex_1", "flex_2", "flex_3", "flex_4",
     "Label"
 ]
 os.makedirs(OUTPUT_DIR, exist_ok=True)

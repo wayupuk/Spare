@@ -238,7 +238,7 @@ void checkCommand(){
       Serial.println();
       Serial.print("[Arduino] "); Serial.println("  help          - Show this help message");
       Serial.print("[Arduino] "); Serial.println("  reset         - Reboot the device");
-      Serial.print("[Arduino] "); Serial.println("  gyro_cal      - Gyroscope Calibration");
+    //   Serial.print("[Arduino] "); Serial.println("  gyro_cal      - Gyroscope Calibration");
       Serial.print("[Arduino] "); Serial.println("  flex_cal      - Flex Sensor Calibration");
       Serial.print("[Arduino] "); Serial.println("  full_cal      - Full Calibration (Gyro + Flex)");
       Serial.print("[Arduino] "); Serial.println("  reset_time    - Reset CSV time baseline"); // Clarified command

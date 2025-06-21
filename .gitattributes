@@ -1,3 +1,4 @@
 collect_data/out_data/20250607_152011.mp4 filter=lfs diff=lfs merge=lfs -text
 collect_data/out_data/*.mp4 filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
+.mp4* filter=lfs diff=lfs merge=lfs -text
