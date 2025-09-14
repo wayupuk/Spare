@@ -22,6 +22,7 @@ DELTA_FLEX_THRESHOLD = 0
 WINDOW_SIZE = 2   # ใช้ย้อนหลัง 5 segment
 ini_state = False
 classifier = RapidChangeWindowClassifier(DELTA_ACC_THRESHOLD,DELTA_GYRO_THRESHOLD,DELTA_FLEX_THRESHOLD,WINDOW_SIZE)
+model = CNNTimeSeriesClassifier((50,28),51)
 predictions = []
 data = []
 ft = []
@@ -29,13 +30,17 @@ sta = []
 state = False
 a = []
 thes = 5
-model_path = "./asset/finalmodel_86.pt"
+model_path = r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\asset\model_89.pth"
 if torch.cuda.is_available():
-    model = torch.load(model_path,weights_only=False)
+    weight = torch.load(model_path,weights_only=True)
+    model.load_state_dict(weight)
     device = "cuda"
 else:
-    model = torch.load(model_path,weights_only=False,map_location=torch.device('cpu'))
+    weight = torch.load(model_path,weights_only=False,map_location=torch.device('cpu'))
+    model.load_state_dict(weight)
     device = "cpu"
+    
+
 model.to(device)
 model.double()
 model.eval()
@@ -121,7 +126,7 @@ async def predict_api(payload: PredictRequest):
         # logger.info(content[str(torch.argmax(outputs).item())])
         # result = {"received": payload.feature, "answer": content[str(torch.argmax(outputs).item())]}
         # print(batch_x)
-        result = {"received":batch_x.tolist()}
+        result = {"received":content[str(torch.argmax(outputs).item())]}
     else:
         result = {"received":len(data)}
     
