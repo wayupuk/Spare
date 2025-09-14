@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive Predict</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial; padding:20px}
+    textarea{width:100%; height:120px}
+    .loglink{margin-top:12px; display:inline-block}
+  </style>
+</head>
+<body>
+  <h1>Send text to /predict</h1>
+  <form id="frm">
+    <label for="text">Text</label><br>
+    <textarea id="text" name="text">Hello from web</textarea><br>
+    <button type="button" id="sendjson">Send as JSON</button>
+    <button type="button" id="sendform">Send as Form POST</button>
+  </form>
+
+  <h2>Response</h2>
+  <pre id="resp">(no response yet)</pre>
+
+  <a class="loglink" href="/logs" target="_blank">View backend logs</a>
+
+<script>
+async function postJSON(){
+  const text = document.getElementById('text').value;
+  const payload = { text };
+  const res = await fetch('/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  document.getElementById('resp').textContent = JSON.stringify(data, null, 2);
+}
+
+async function postForm(){
+  const text = document.getElementById('text').value;
+  const fd = new FormData();
+  fd.append('text', text);
+  const res = await fetch('/predict-form', { method: 'POST', body: fd });
+  const data = await res.json();
+  document.getElementById('resp').textContent = JSON.stringify(data, null, 2);
+}
+
+document.getElementById('sendjson').addEventListener('click', postJSON);
+document.getElementById('sendform').addEventListener('click', postForm);
+</script>
+</body>
+</html>
