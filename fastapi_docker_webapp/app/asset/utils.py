@@ -15,10 +15,9 @@ import random
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from argparse import ArgumentParser
 from collections import deque
-from transformers import pipeline
-MODEL_NAME = "airesearch/wangchanberta-base-att-spm-uncased"
-# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-# model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+from transformers import pipeline,WhisperForConditionalGeneration
+from peft import PeftModel
+
 
 thes = 5
 
@@ -36,11 +35,33 @@ ini_state = False
 
 class S2S:
     def __init__(self,model_name):
+        
         self.model = pipeline("text-generation", model=model_name, torch_dtype=torch.bfloat16, device_map="auto")
         
         
     def predict(self,text,persona=None):
         outputs = self.model(text, max_new_tokens=25, do_sample=True, temperature=0.9, top_k=50, top_p=0.95, no_repeat_ngram_size=2,typical_p=1.)
+        return outputs
+    
+    
+class Whisper:
+    def __init__(self,model_name,peft_model_id):
+        base_model = WhisperForConditionalGeneration.from_pretrained(model_name)
+        model = PeftModel.from_pretrained(base_model, peft_model_id)
+        self.model = pipeline(task="automatic-speech-recognition", model=model, torch_dtype=torch.bfloat16, device_map="auto")
+        
+        
+    def predict(self,speech):
+        outputs = self.model("audio.mp3", generate_kwargs={"language":"<|th|>", "task":"transcribe"}, batch_size=16)["text"]
+        return outputs
+    
+class Thonburain:
+    def __init__(self,model_name):
+        self.model = pipeline(task="automatic-speech-recognition", model=model_name, torch_dtype=torch.bfloat16, device_map="auto")
+        
+        
+    def predict(self,speech):
+        outputs = self.model(r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\f5_tts\infer\examples\basic\basic_ref_en.wav", generate_kwargs={"language":"<|th|>", "task":"transcribe"}, batch_size=16)["text"]
         return outputs
 
 class RapidChangeWindowClassifier:

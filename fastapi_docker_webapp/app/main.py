@@ -10,7 +10,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
-from asset.utils import S2S,RapidChangeWindowClassifier,CNNTimeSeriesClassifier
+from asset.utils import S2S,RapidChangeWindowClassifier,CNNTimeSeriesClassifier,Thonburain
 from f5_tts.api import F5TTS
 print(os.curdir)
 import torch
@@ -26,7 +26,7 @@ shl_path = config["shl_path"]
 ft_model = config["ft_model"]
 vocab_file = config["vocab_file"]
 rollback = config["rollback"]
-
+asr_path = config["asr_path"]
 
 "-----------------------------------------"
 DELTA_ACC_THRESHOLD = 0
@@ -68,7 +68,7 @@ f5_tts = F5TTS(
         vocab_file=vocab_file
         
 )
-
+asr = Thonburain(asr_path)
 print("Ready to use")
 "------------------------------------------"
 APP_DIR = Path(__file__).resolve().parent
@@ -160,6 +160,13 @@ async def predict_form(request: Request, text: str = Form(...)):
     logger.info(f"/predict called (form) with text={text}")
     result = {"received": text, "length": len(text)}
     logger.info(f"/predict-form result: {result}")
+    return JSONResponse(result)
+
+
+@app.post("/transcribe")
+async def predict_form(request: Text_voice):
+    output = asr.predict(request.texts)
+    result = {"output":output}
     return JSONResponse(result)
 
 
