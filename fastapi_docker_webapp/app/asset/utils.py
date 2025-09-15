@@ -15,6 +15,10 @@ import random
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from argparse import ArgumentParser
 from collections import deque
+from transformers import pipeline
+MODEL_NAME = "airesearch/wangchanberta-base-att-spm-uncased"
+# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+# model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
 thes = 5
 
@@ -29,6 +33,15 @@ DELTA_GYRO_THRESHOLD = 0
 DELTA_FLEX_THRESHOLD = 0
 WINDOW_SIZE = 2   # ใช้ย้อนหลัง 5 segment
 ini_state = False
+
+class S2S:
+    def __init__(self,model_name):
+        self.model = pipeline("text-generation", model=model_name, torch_dtype=torch.bfloat16, device_map="auto")
+        
+        
+    def predict(self,text,persona=None):
+        outputs = self.model(text, max_new_tokens=25, do_sample=True, temperature=0.9, top_k=50, top_p=0.95, no_repeat_ngram_size=2,typical_p=1.)
+        return outputs
 
 class RapidChangeWindowClassifier:
     
@@ -252,3 +265,5 @@ class CNNTimeSeriesClassifier(nn.Module):
             'dropout': self.dropout_rate,
             'flatten_size': self.flatten_size
         }
+        
+        
