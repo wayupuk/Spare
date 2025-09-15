@@ -11,12 +11,23 @@ from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 from asset.utils import S2S,RapidChangeWindowClassifier,CNNTimeSeriesClassifier
-# from f5_tts import api as fapi
+from f5_tts.api import F5TTS
 print(os.curdir)
 import torch
 import json
-import torch.nn as nn
-import torch.nn.functional as f
+import yaml
+"-----------------------------------------"
+### initial path
+with open("./asset/config.yaml", 'r') as file:
+        config = yaml.load(file, Loader=yaml.FullLoader)
+        print("YAML data loaded successfully:")
+seq_name = config["seq_name"]
+shl_path = config["shl_path"]
+ft_model = config["ft_model"]
+vocab_file = config["vocab_file"]
+rollback = config["rollback"]
+
+
 "-----------------------------------------"
 DELTA_ACC_THRESHOLD = 0
 DELTA_GYRO_THRESHOLD = 0
@@ -25,8 +36,8 @@ WINDOW_SIZE = 2   # ใช้ย้อนหลัง 5 segment
 ini_state = False
 classifier = RapidChangeWindowClassifier(DELTA_ACC_THRESHOLD,DELTA_GYRO_THRESHOLD,DELTA_FLEX_THRESHOLD,WINDOW_SIZE)
 model = CNNTimeSeriesClassifier((50,28),51)
-model_name = r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\asset\model\KhanomTanLLM-1B"
-seq = S2S(model_name)
+
+seq = S2S(seq_name)
 predictions = []
 data = []
 ft = []
@@ -34,13 +45,13 @@ sta = []
 state = False
 a = []
 thes = 5
-model_path = r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\asset\model\model_89.pth"
+
 if torch.cuda.is_available():
-    weight = torch.load(model_path,weights_only=True)
+    weight = torch.load(shl_path,weights_only=True)
     model.load_state_dict(weight)
     device = "cuda"
 else:
-    weight = torch.load(model_path,weights_only=False,map_location=torch.device('cpu'))
+    weight = torch.load(shl_path,weights_only=False,map_location=torch.device('cpu'))
     model.load_state_dict(weight)
     device = "cpu"
     
@@ -49,10 +60,14 @@ model.to(device)
 model.double()
 model.eval()
 
-with open("./asset/rollback.json","r",encoding='utf-8') as f:
+with open(rollback,"r",encoding='utf-8') as f:
         content = json.load(f)
 
-# f5_tts = api.F5TTS()
+f5_tts = F5TTS(
+    ckpt_file=ft_model,
+        vocab_file=vocab_file
+        
+)
 
 print("Ready to use")
 "------------------------------------------"
@@ -156,16 +171,18 @@ async def predict_form(request: Text_voice):
     result = {"texts":request.texts}
     output = seq.predict(request.texts)
     result["outputs"] = output
-    
-    # wav, sr, spect = f5_tts.infer(
-    #     ref_file=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
-    #     ref_text="some call me nature, others call me mother nature.",
-    #     gen_text=request.texts,
-    #     # file_wave=str(files("f5_tts").joinpath("../../tests/api_out.wav")),
-    #     # file_spect=str(files("f5_tts").joinpath("../../tests/api_out.png")),
-    #     # seed=-1,  # random seed = -1
-    # )
-    
+    print(output)
+    text = output[0][0]["generated_text"]
+    wav, sr, spect = f5_tts.infer(
+        # ref_file=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
+        ref_file=r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\f5_tts\infer\examples\basic\basic_ref_en.wav",
+        ref_text="some call me nature, others call me mother nature.",
+        gen_text=text,
+        # file_wave=str(files("f5_tts").joinpath("../../tests/api_out.wav")),
+        # file_spect=str(files("f5_tts").joinpath("../../tests/api_out.png")),
+        # seed=-1,  # random seed = -1
+    )
+    result["signal"] = len(wav)
     
     return JSONResponse(result)
 
