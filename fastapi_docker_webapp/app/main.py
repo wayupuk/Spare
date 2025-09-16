@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form,UploadFile, File,WebSocketDisconnect,WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,6 +16,11 @@ print(os.curdir)
 import torch
 import json
 import yaml
+import soundfile as sf
+import io
+from pydub import AudioSegment
+import librosa
+import numpy as np
 "-----------------------------------------"
 ### initial path
 with open("./asset/config.yaml", 'r') as file:
@@ -29,15 +34,15 @@ rollback = config["rollback"]
 asr_path = config["asr_path"]
 
 "-----------------------------------------"
-DELTA_ACC_THRESHOLD = 0
-DELTA_GYRO_THRESHOLD = 0
-DELTA_FLEX_THRESHOLD = 0
+DELTA_ACC_THRESHOLD = 0.8
+DELTA_GYRO_THRESHOLD = 1
+DELTA_FLEX_THRESHOLD = 3
 WINDOW_SIZE = 2   # ใช้ย้อนหลัง 5 segment
 ini_state = False
 classifier = RapidChangeWindowClassifier(DELTA_ACC_THRESHOLD,DELTA_GYRO_THRESHOLD,DELTA_FLEX_THRESHOLD,WINDOW_SIZE)
 model = CNNTimeSeriesClassifier((50,28),51)
 
-seq = S2S(seq_name)
+
 predictions = []
 data = []
 ft = []
@@ -45,7 +50,7 @@ sta = []
 state = False
 a = []
 thes = 5
-
+clients = []
 if torch.cuda.is_available():
     weight = torch.load(shl_path,weights_only=True)
     model.load_state_dict(weight)
@@ -62,12 +67,12 @@ model.eval()
 
 with open(rollback,"r",encoding='utf-8') as f:
         content = json.load(f)
-
-f5_tts = F5TTS(
-    ckpt_file=ft_model,
-        vocab_file=vocab_file
+# seq = S2S(seq_name)
+# f5_tts = F5TTS(
+#     ckpt_file=ft_model,
+#         vocab_file=vocab_file
         
-)
+# )
 asr = Thonburain(asr_path)
 print("Ready to use")
 "------------------------------------------"
@@ -120,40 +125,40 @@ async def view_logs(request: Request, lines: int = 200):
             logs = "".join(f.readlines()[-n:])
     return templates.TemplateResponse("logs.html", {"request": request, "logs": logs})
 
-@app.post("/predict")
-async def predict_api(payload: PredictRequest):
+# @app.post("/predict")
+# async def predict_api(payload: PredictRequest):
     
-    global predictions
-    global data 
-    global ft
-    global sta
-    global state 
-    global a 
-    global thes 
+#     global predictions
+#     global data 
+#     global ft
+#     global sta
+#     global state 
+#     global a 
+#     global thes 
     
     
-    logger.info(f"/predict called (api) with text={payload.feature}")
-    # result = {"received": payload.feature, "length": len(payload.feature)}
-    # logger.info(f"/predict result: {result}")
-    rows = payload.feature
-    logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
-    ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
-    # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
+#     logger.info(f"/predict called (api) with text={payload.feature}")
+#     # result = {"received": payload.feature, "length": len(payload.feature)}
+#     # logger.info(f"/predict result: {result}")
+#     rows = payload.feature
+#     logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
+#     ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
+#     # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
     
-    if state==True and len(ft)>=thes and len(predictions) > 10:
+#     if state==True and len(ft)>=thes and len(predictions) > 10:
         
-        sequence = classifier.padding(data,thes)
-        # print(sequence)
-        batch_x = torch.from_numpy(sequence)
-        batch_x = batch_x[:,1:].unsqueeze(0)
+#         sequence = classifier.padding(data,thes)
+#         # print(sequence)
+#         batch_x = torch.from_numpy(sequence)
+#         batch_x = batch_x[:,1:].unsqueeze(0)
         
-        outputs = model(batch_x.double().to(device))
-        text = content[str(torch.argmax(outputs).item())]
-        result = {"received":text}
-    else:
-        result = {"received":len(data)}
+#         outputs = model(batch_x.double().to(device))
+#         text = content[str(torch.argmax(outputs).item())]
+#         result = {"received":text}
+#     else:
+#         result = {"received":len(data)}
     
-    return JSONResponse(result)
+#     return JSONResponse(result)
 
 @app.post("/predict-form")
 async def predict_form(request: Request, text: str = Form(...)):
@@ -163,35 +168,107 @@ async def predict_form(request: Request, text: str = Form(...)):
     return JSONResponse(result)
 
 
-@app.post("/transcribe")
-async def predict_form(request: Text_voice):
-    output = asr.predict(request.texts)
-    result = {"output":output}
-    return JSONResponse(result)
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    clients.append(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()  # not used for now
+    except WebSocketDisconnect:
+        clients.remove(websocket)
+
+# API endpoint that dummy_bot can call
+@app.post("/dummy_bot")
+async def dummy_bot(payload: PredictRequest):
 
 
-@app.post("/tts")
-async def predict_form(request: Text_voice):
+    global predictions
+    global data 
+    global ft
+    global sta
+    global state 
+    global a 
+    global thes 
     
-    global f5_tts
     
-    result = {"texts":request.texts}
-    output = seq.predict(request.texts)
-    result["outputs"] = output
-    print(output)
-    text = output[0][0]["generated_text"]
-    wav, sr, spect = f5_tts.infer(
-        # ref_file=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
-        ref_file=r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\f5_tts\infer\examples\basic\basic_ref_en.wav",
-        ref_text="some call me nature, others call me mother nature.",
-        gen_text=text,
-        # file_wave=str(files("f5_tts").joinpath("../../tests/api_out.wav")),
-        # file_spect=str(files("f5_tts").joinpath("../../tests/api_out.png")),
-        # seed=-1,  # random seed = -1
-    )
-    result["signal"] = len(wav)
+    # logger.info(f"/predict called (api) with text={payload.feature}")
+    # result = {"received": payload.feature, "length": len(payload.feature)}
+    # logger.info(f"/predict result: {result}")
+    rows = payload.feature
+    # logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
+    ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
+    # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
     
-    return JSONResponse(result)
+    if state==True and len(ft)>=thes and len(predictions) > 40+thes:
+        
+        sequence = classifier.padding(data,thes)
+        # print(sequence)
+        batch_x = torch.from_numpy(sequence)
+        batch_x = batch_x[:,1:].unsqueeze(0)
+        
+        outputs = model(batch_x.double().to(device))
+        text = content[str(torch.argmax(outputs).item())]
+        result = {"received":text}
+        
+        for client in clients:
+            await client.send_json({"type": "bot", "content": text})
+            
+            
+        predictions = []
+        data = []
+        ft = []
+        sta = []
+        state = False
+    else:
+        result = {"received":len(data)}
+        return result
+    return {"status": "ok"}
+
+
+# @app.post("/tts")
+# async def predict_form(request: Text_voice):
+    
+#     global f5_tts
+    
+#     result = {"texts":request.texts}
+#     output = seq.predict(request.texts)
+#     result["outputs"] = output
+#     print(output)
+#     text = output[0][0]["generated_text"]
+#     wav, sr, spect = f5_tts.infer(
+#         # ref_file=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
+#         ref_file=r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\f5_tts\infer\examples\basic\basic_ref_en.wav",
+#         ref_text="some call me nature, others call me mother nature.",
+#         gen_text=text,
+#         # file_wave=str(files("f5_tts").joinpath("../../tests/api_out.wav")),
+#         # file_spect=str(files("f5_tts").joinpath("../../tests/api_out.png")),
+#         # seed=-1,  # random seed = -1
+#     )
+#     result["signal"] = len(wav)
+    
+#     return JSONResponse(result)
+
+
+@app.post("/upload-audio")
+async def upload_audio(request: Request):
+    # file_path = os.path.join(UPLOAD_DIR, file.filename)
+    wav = await request.body()
+    audio = AudioSegment.from_file(io.BytesIO(wav), format="webm",)
+    samples = np.array(audio.get_array_of_samples())
+    samplerate = audio.frame_rate
+    
+    max_val = 2**(audio.sample_width * 8 - 1)
+    float32_samples = samples.astype(np.float32) / max_val
+    output = asr.predict(float32_samples,samplerate)
+
+    # output,_ = librosa.load(io.BytesIO(wav))
+    
+    
+    {"status": "samples", "info": output}
+    return {"status": "samples", "info": output}
+
+
 
 
 @app.get("/health")
