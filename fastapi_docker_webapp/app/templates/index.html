@@ -1,53 +1,1412 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Interactive Predict</title>
-  <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial; padding:20px}
-    textarea{width:100%; height:120px}
-    .loglink{margin-top:12px; display:inline-block}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastAPI Audio Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8fafc;
+            color: #334155;
+            overflow-x: hidden;
+        }
+        .logo-image {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            object-fit: cover;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+            box-shadow: 4px 0 12px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            transform: translateX(0);
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid #334155;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #3bf7c8 0%, #3bf7c8 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 18px;
+        }
+
+        .logo-text {
+            color: white;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .nav-menu {
+            padding: 20px 0;
+        }
+
+        .nav-section {
+            margin-bottom: 32px;
+        }
+
+        .nav-section-title {
+            color: #94a3b8;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0 20px 12px;
+        }
+
+        .nav-item {
+            position: relative;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: #cbd5e1;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border-left-color: #10b981;
+        }
+
+        .nav-link.active {
+            background: rgba(16, 185, 129, 0.15);
+            color: #3eb4f8;
+            border-left-color: #3eb4f8;
+        }
+
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 12px;
+            fill: currentColor;
+        }
+
+        .main-content {
+            flex: 1;
+            margin-left: 280px;
+            padding: 24px;
+            transition: margin-left 0.3s ease;
+            min-height: 100vh;
+        }
+
+        .main-content.expanded {
+            margin-left: 0;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 24px;
+        }
+
+        .toggle-btn {
+            background: #f1f5f9;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s ease;
+        }
+
+        .toggle-btn:hover {
+            background: #e2e8f0;
+        }
+
+        .status-badge {
+            background: #dcfce7;
+            color: #166534;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .content-area {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 120px);
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .chat-header h1 {
+            color: #1e293b;
+            font-size: 24px;
+            margin: 0;
+        }
+
+        .chat-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #10b981;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 80%;
+        }
+
+        .bot-message {
+            align-self: flex-start;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .bot-message .message-avatar {
+            background: linear-gradient(135deg, #4fdff1 0%, #0300bd 100%);
+        }
+
+        .user-message .message-avatar {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+
+        .avatar-icon {
+            font-size: 18px;
+        }
+
+        .message-content {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .message-text {
+            background: #f1f5f9;
+            padding: 12px 16px;
+            border-radius: 18px;
+            color: #334155;
+            line-height: 1.5;
+        }
+
+        .user-message .message-text {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #94a3b8;
+            padding: 0 8px;
+        }
+
+        .user-message .message-time {
+            text-align: right;
+        }
+
+        /* Enhanced Audio Controls */
+        .audio-message {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 280px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .user-message .audio-message {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .audio-player {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .audio-play-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.9);
+            color: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .audio-play-btn:hover {
+            background: white;
+            transform: scale(1.05);
+        }
+
+        .audio-play-btn.playing {
+            background: #10b981;
+            color: white;
+        }
+
+        .audio-play-btn.loading {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .audio-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .audio-progress-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .audio-progress {
+            flex: 1;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .audio-progress-bar {
+            height: 100%;
+            background: #10b981;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        .audio-time {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+            min-width: 35px;
+            text-align: center;
+        }
+
+        .user-message .audio-time {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .audio-waveform {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            height: 20px;
+        }
+
+        .waveform-bar {
+            width: 2px;
+            background: rgba(255, 255, 255, 0.4);
+            border-radius: 1px;
+            transition: all 0.3s ease;
+        }
+
+        .waveform-bar.active {
+            background: #10b981;
+        }
+
+        /* Play/Pause Icons */
+        .play-icon, .pause-icon, .loading-icon {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+
+        .pause-icon, .loading-icon {
+            display: none;
+        }
+
+        .audio-play-btn.playing .play-icon {
+            display: none;
+        }
+
+        .audio-play-btn.playing .pause-icon {
+            display: block;
+        }
+
+        .audio-play-btn.loading .play-icon,
+        .audio-play-btn.loading .pause-icon {
+            display: none;
+        }
+
+        .audio-play-btn.loading .loading-icon {
+            display: block;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .chat-input-container {
+            padding: 20px 24px;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 25px;
+            font-size: 14px;
+            background: white;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .chat-input:focus {
+            border-color: #10b981;
+        }
+
+        .audio-controls-container {
+            display: flex;
+            gap: 8px;
+        }
+
+        .record-button {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .record-button.idle {
+            background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+            color: white;
+        }
+
+        .record-button.recording {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            animation: recordPulse 1s infinite;
+        }
+
+        .record-button.processing {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        @keyframes recordPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .send-button {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #52dcff 0%, #050f96 100%);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease;
+        }
+
+        .send-button:hover {
+            transform: scale(1.05);
+        }
+
+        .send-button:active {
+            transform: scale(0.95);
+        }
+
+        .recording-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #ef4444;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 500;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            z-index: 1001;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .recording-indicator.active {
+            display: flex;
+        }
+
+        .recording-dot {
+            width: 8px;
+            height: 8px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 1s infinite;
+        }
+
+        /* Sidebar overlay for mobile */
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 999;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Mobile Responsive Design - Updated */
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            /* Transform sidebar to slide from top */
+            .sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 70vh;
+                min-height: 300px;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                transform: translateY(-100%);
+                transition: transform 0.3s ease;
+                z-index: 1002;
+            }
+            
+            .sidebar.active {
+                transform: translateY(0);
+            }
+            
+            .sidebar.collapsed {
+                transform: translateY(-100%);
+            }
+            
+            .main-content {
+                margin-left: 0;
+                padding: 12px;
+                margin-top: 0;
+            }
+            
+            .main-content.expanded {
+                margin-left: 0;
+                margin-top: 0;
+            }
+
+            .content-area {
+                height: calc(100vh - 100px);
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            .audio-message {
+                min-width: 240px;
+            }
+
+            .nav-menu {
+                padding: 10px 0;
+                max-height: calc(70vh - 100px);
+                overflow-y: auto;
+            }
+
+            .nav-section {
+                margin-bottom: 16px;
+            }
+
+            .sidebar-header {
+                padding: 16px 20px;
+            }
+
+            .logo-text {
+                font-size: 18px;
+            }
+
+            .header {
+                position: relative;
+                z-index: 998;
+                margin-bottom: 12px;
+            }
+
+            /* Make nav links more touch-friendly on mobile */
+            .nav-link {
+                padding: 16px 20px;
+                font-size: 16px;
+            }
+
+            .nav-icon {
+                width: 24px;
+                height: 24px;
+            }
+        }
+
+        /* Landscape mobile */
+        @media (max-width: 768px) and (orientation: landscape) {
+            .sidebar {
+                max-height: 60vh;
+            }
+
+            .nav-menu {
+                max-height: calc(60vh - 100px);
+            }
+        }
+
+        /* Very small screens */
+        @media (max-width: 480px) {
+            .header {
+                padding: 12px 16px;
+            }
+
+            .chat-header h1 {
+                font-size: 20px;
+            }
+
+            .chat-messages {
+                padding: 16px;
+            }
+
+            .chat-input-container {
+                padding: 16px;
+            }
+
+            .sidebar {
+                min-height: 280px;
+                max-height: 75vh;
+            }
+        }
+    </style>
 </head>
 <body>
-  <h1>Send text to /predict</h1>
-  <form id="frm">
-    <label for="text">Text</label><br>
-    <textarea id="text" name="text">Hello from web</textarea><br>
-    <button type="button" id="sendjson">Send as JSON</button>
-    <button type="button" id="sendform">Send as Form POST</button>
-  </form>
+    <div class="recording-indicator" id="recordingIndicator">
+        <div class="recording-dot"></div>
+        <span id="recordingTimer">00:00</span>
+    </div>
 
-  <h2>Response</h2>
-  <pre id="resp">(no response yet)</pre>
+    <!-- Sidebar overlay for mobile -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-  <a class="loglink" href="/logs" target="_blank">View backend logs</a>
+    <div class="container">
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <img src="logo.png" alt="FastAPI Logo" class="logo-image">
+                    <!-- <div class="logo-icon">F</div> -->
+                    <span class="logo-text">MOCAP DEMO</span>
+                </div>
+            </div>
+            
+            <div class="nav-menu">
+                <div class="nav-section">
+                    <div class="nav-section-title">Chat</div>
+                    <div class="nav-item">
+                        <a href="#" class="nav-link active">
+                            <svg class="nav-icon" viewBox="0 0 20 20">
+                                <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z"/>
+                                <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z"/>
+                            </svg>
+                            Chat
+                        </a>
+                    </div>
+                    <div class="nav-item">
+                        <a href="#" class="nav-link">
+                            <svg class="nav-icon" viewBox="0 0 20 20">
+                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+                                <path fill-rule="evenodd" d="M4 5a2 2 0 012-2v1a1 1 0 102 0V3a2 2 0 012 0v1a1 1 0 102 0V3a2 2 0 012 2v6h-1a1 1 0 100 2h1v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2h1a1 1 0 100-2H4V5z"/>
+                            </svg>
+                            Chat History
+                        </a>
+                    </div>
+                </div>
 
-<script>
-async function postJSON(){
-  const text = document.getElementById('text').value;
-  const payload = { text };
-  const res = await fetch('/predict', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  document.getElementById('resp').textContent = JSON.stringify(data, null, 2);
-}
+                <!-- <div class="nav-section">
+                    <div class="nav-section-title">API</div>
+                    <div class="nav-item">
+                        <a href="#" class="nav-link">
+                            <svg class="nav-icon" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0h8v12H6V4z"/>
+                                <path d="M8 6h4v2H8V6zM8 10h4v2H8v-2z"/>
+                            </svg>
+                            Endpoints
+                        </a>
+                    </div>
+                    <div class="nav-item">
+                        <a href="#" class="nav-link">
+                            <svg class="nav-icon" viewBox="0 0 20 20">
+                                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            Health Check
+                        </a>
+                    </div>
+                </div> -->
 
-async function postForm(){
-  const text = document.getElementById('text').value;
-  const fd = new FormData();
-  fd.append('text', text);
-  const res = await fetch('/predict-form', { method: 'POST', body: fd });
-  const data = await res.json();
-  document.getElementById('resp').textContent = JSON.stringify(data, null, 2);
-}
+                <div class="nav-section">
+                    <div class="nav-section-title">Settings</div>
+                    <div class="nav-item">
+                        <a href="#" class="nav-link">
+                            <svg class="nav-icon" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"/>
+                            </svg>
+                            Configuration
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </nav>
 
-document.getElementById('sendjson').addEventListener('click', postJSON);
-document.getElementById('sendform').addEventListener('click', postForm);
-</script>
+        <main class="main-content" id="mainContent">
+            <div class="header">
+                <button class="toggle-btn" onclick="toggleSidebar()">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/>
+                    </svg>
+                </button>
+                
+                <!-- <div class="status-badge">Voice Chat Ready</div> -->
+            </div>
+
+            <div class="content-area">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h1>Chat</h1>
+                        <div class="chat-status">
+                            <div class="status-dot"></div>
+                            <span>Connected</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message bot-message">
+                            <div class="message-avatar">
+                                <div class="avatar-icon">🤖</div>
+                            </div>
+                            <div class="message-content">
+                                <div class="message-text">Hello! I'm your FastAPI assistant. You can type messages or record audio. How can I help you today?</div>
+                                <div class="message-time">Just now</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-container">
+                        <div class="chat-input-wrapper">
+                            <input type="text" id="messageInput" placeholder="Type your message or record audio..." class="chat-input">
+                            <div class="audio-controls-container">
+                                <button id="recordButton" class="record-button idle">
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"/>
+                                    </svg>
+                                </button>
+                                <button id="sendButton" class="send-button">
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let sidebarCollapsed = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let recordingTimer = null;
+        let recordingStartTime = null;
+        let currentAudio = null;
+        let currentAudioId = null;
+        let audioInstances = new Map();
+        
+        // DOM elements
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const recordButton = document.getElementById('recordButton');
+        const chatMessages = document.getElementById('chatMessages');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const recordingTimerDisplay = document.getElementById('recordingTimer');
+        const sidebar = document.getElementById('sidebar');
+        const mainContent = document.getElementById('mainContent');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+        // Initialize audio recording
+        async function initializeAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                        console.log(event.data)
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioChunks = [];
+                    console.log(audioBlob)
+                    handleAudioRecording(audioBlob);
+                };
+                
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                alert('Microphone access is required for voice recording. Please allow microphone access and refresh the page.');
+            }
+        }
+
+
+
+
+        // Enhanced toggle sidebar function
+        function toggleSidebar() {
+            const isMobile = window.innerWidth <= 768;
+            
+            if (isMobile) {
+                // Mobile behavior - toggle from top
+                const isActive = sidebar.classList.contains('active');
+                
+                if (isActive) {
+                    // Hide sidebar
+                    sidebar.classList.remove('active');
+                    sidebarOverlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                } else {
+                    // Show sidebar
+                    sidebar.classList.add('active');
+                    sidebarOverlay.classList.add('active');
+                    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+                }
+            } else {
+                // Desktop behavior - toggle from left
+                sidebarCollapsed = !sidebarCollapsed;
+                
+                if (sidebarCollapsed) {
+                    sidebar.classList.add('collapsed');
+                    mainContent.classList.add('expanded');
+                } else {
+                    sidebar.classList.remove('collapsed');
+                    mainContent.classList.remove('expanded');
+                }
+            }
+        }
+
+        // Close sidebar when overlay is clicked (mobile)
+        sidebarOverlay.addEventListener('click', () => {
+            if (window.innerWidth <= 768) {
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+
+        // Close sidebar when clicking outside on mobile
+        document.addEventListener('click', (e) => {
+            if (window.innerWidth <= 768) {
+                const isClickInsideSidebar = sidebar.contains(e.target);
+                const isToggleButton = e.target.closest('.toggle-btn');
+                const isSidebarActive = sidebar.classList.contains('active');
+                
+                if (!isClickInsideSidebar && !isToggleButton && isSidebarActive) {
+                    sidebar.classList.remove('active');
+                    sidebarOverlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            }
+        });
+
+        // Handle escape key to close sidebar on mobile
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && window.innerWidth <= 768 && sidebar.classList.contains('active')) {
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+
+        // Create audio player component
+        function createAudioPlayer(audioBlob, messageId) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // Generate random waveform bars for visual effect
+            const waveformBars = Array.from({length: 20}, () => Math.random() * 15 + 5)
+                .map(height => `<div class="waveform-bar" style="height: ${height}px;"></div>`)
+                .join('');
+            
+            return `
+                <div class="audio-message">
+                    <div class="audio-player">
+                        <button class="audio-play-btn" data-audio-id="${messageId}" onclick="toggleAudioPlayback('${audioUrl}', '${messageId}')">
+                            <!-- Play Icon -->
+                            <svg class="play-icon" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"/>
+                            </svg>
+                            <!-- Pause Icon -->
+                            <svg class="pause-icon" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"/>
+                            </svg>
+                            <!-- Loading Icon -->
+                            <svg class="loading-icon" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"/>
+                            </svg>
+                        </button>
+                        
+                        <div class="audio-info">
+                            <div class="audio-progress-container">
+                                <div class="audio-progress" onclick="seekAudio(event, '${messageId}')">
+                                    <div class="audio-progress-bar" id="progress-${messageId}"></div>
+                                </div>
+                                <div class="audio-time" id="time-${messageId}">0:00</div>
+                            </div>
+                            <div class="audio-waveform" id="waveform-${messageId}">
+                                ${waveformBars}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Enhanced audio playback with proper play/pause functionality
+        function toggleAudioPlayback(audioUrl, messageId) {
+            const button = document.querySelector(`[data-audio-id="${messageId}"]`);
+            const progressBar = document.getElementById(`progress-${messageId}`);
+            const timeDisplay = document.getElementById(`time-${messageId}`);
+            const waveformBars = document.querySelectorAll(`#waveform-${messageId} .waveform-bar`);
+            
+            // If another audio is playing, stop it first
+            if (currentAudio && currentAudioId !== messageId && !currentAudio.paused) {
+                stopCurrentAudio();
+            }
+            
+            // Check if this audio exists and is currently playing
+            if (audioInstances.has(messageId)) {
+                const audio = audioInstances.get(messageId);
+                console.log(audio)
+                if (!audio.paused) {
+                    // Audio is playing, so pause it
+                    audio.pause();
+                    button.classList.remove('playing');
+                    currentAudio = null;
+                    currentAudioId = null;
+                    return;
+                } else {
+                    // Audio is paused, so resume it
+                    audio.play().then(() => {
+                        button.classList.add('playing');
+                        currentAudio = audio;
+                        currentAudioId = messageId;
+                    }).catch(error => {
+                        console.error('Error resuming audio:', error);
+                        button.classList.remove('playing');
+                    });
+                    return;
+                }
+            }
+            
+            // Create new audio instance if doesn't exist
+            const audio = new Audio(audioUrl);
+            audioInstances.set(messageId, audio);
+            
+            // Set up event listeners for this audio instance
+            audio.addEventListener('loadstart', () => {
+                button.classList.add('loading');
+            });
+            
+            audio.addEventListener('canplay', () => {
+                button.classList.remove('loading');
+            });
+            
+            audio.addEventListener('timeupdate', () => {
+                if (currentAudioId === messageId) {
+                    const progress = (audio.currentTime / audio.duration) * 100;
+                    progressBar.style.width = `${progress || 0}%`;
+                    
+                    // Update time display
+                    const currentTime = formatTime(audio.currentTime);
+                    timeDisplay.textContent = currentTime;
+                    
+                    // Animate waveform bars
+                    const activeIndex = Math.floor((audio.currentTime / audio.duration) * waveformBars.length);
+                    waveformBars.forEach((bar, index) => {
+                        if (index <= activeIndex) {
+                            bar.classList.add('active');
+                        } else {
+                            bar.classList.remove('active');
+                        }
+                    });
+                }
+            });
+            
+            audio.addEventListener('ended', () => {
+                button.classList.remove('playing');
+                progressBar.style.width = '0%';
+                timeDisplay.textContent = '0:00';
+                waveformBars.forEach(bar => bar.classList.remove('active'));
+                currentAudio = null;
+                currentAudioId = null;
+                // Reset audio to beginning
+                audio.currentTime = 0;
+            });
+            
+            audio.addEventListener('error', (e) => {
+                console.error('Audio playback error:', e);
+                button.classList.remove('loading', 'playing');
+                currentAudio = null;
+                currentAudioId = null;
+                alert('Error playing audio. Please try again.');
+            });
+            
+            // Start playing the audio
+            button.classList.add('loading');
+            audio.play().then(() => {
+                button.classList.remove('loading');
+                button.classList.add('playing');
+                currentAudio = audio;
+                currentAudioId = messageId;
+            }).catch(error => {
+                console.error('Error playing audio:', error);
+                button.classList.remove('loading', 'playing');
+                alert('Error playing audio. Please try again.');
+            });
+        }
+
+        // Stop currently playing audio
+        function stopCurrentAudio() {
+            if (currentAudio) {
+                currentAudio.pause();
+                // Find and update the button state
+                if (currentAudioId) {
+                    const button = document.querySelector(`[data-audio-id="${currentAudioId}"]`);
+                    if (button) {
+                        button.classList.remove('playing');
+                    }
+                    
+                    // Reset progress bar and waveform
+                    const progressBar = document.getElementById(`progress-${currentAudioId}`);
+                    const timeDisplay = document.getElementById(`time-${currentAudioId}`);
+                    const waveformBars = document.querySelectorAll(`#waveform-${currentAudioId} .waveform-bar`);
+                    
+                    if (progressBar) progressBar.style.width = '0%';
+                    if (timeDisplay) timeDisplay.textContent = '0:00';
+                    if (waveformBars) waveformBars.forEach(bar => bar.classList.remove('active'));
+                }
+                
+                currentAudio = null;
+                currentAudioId = null;
+            }
+        }
+
+        // Seek audio to specific position
+        function seekAudio(event, messageId) {
+            const audio = audioInstances.get(messageId);
+            if (!audio) return;
+            
+            const progressBar = event.currentTarget;
+            const rect = progressBar.getBoundingClientRect();
+            const percent = (event.clientX - rect.left) / rect.width;
+            const newTime = percent * audio.duration;
+            
+            if (isFinite(newTime)) {
+                audio.currentTime = newTime;
+            }
+        }
+
+        // Format time for display
+        function formatTime(seconds) {
+            if (!isFinite(seconds)) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Add message to chat
+        function addMessage(text, isUser = false, isAudio = false, audioBlob = null) {
+            const messageDiv = document.createElement('div');
+            const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+            
+            const currentTime = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            console.log(text)
+            let messageContent = '';
+            if (isAudio && audioBlob) {
+                messageContent = createAudioPlayer(audioBlob, messageId);
+            } else {
+                messageContent = `<div class="message-text">${text}</div>`;
+            }
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">
+                    <div class="avatar-icon">${isUser ? '👤' : '🤖'}</div>
+                </div>
+                <div class="message-content">
+                    ${messageContent}
+                    <div class="message-time">${currentTime}</div>
+                </div>
+            `;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+          async function handleAudioRecording(audioBlob) {
+            try {
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const response = await fetch("/upload-audio", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "audio/wav"
+                    },
+                    body: arrayBuffer
+                });
+        
+                const result = await response.json();
+                console.log("Server response:", result);
+
+                addMessage(result.info, isUser=true);
+
+            } catch (err) {
+                console.error("Upload failed:", err);
+            }
+
+        }
+
+        async function callDummyBot() {
+            try {
+                const response = await fetch("/dummy_bot");
+                const data = await response.json();
+                // Call addMessage as a bot (not user)
+                addMessage(data.message, false);
+            } catch (err) {
+                console.error("API call failed", err);
+            }
+        }
+
+
+
+
+        // Start recording
+        function startRecording() {
+            if (!mediaRecorder) {
+                alert('Microphone not initialized. Please refresh the page and allow microphone access.');
+                return;
+            }
+            
+            // Stop any currently playing audio
+            stopCurrentAudio();
+            
+            isRecording = true;
+            recordButton.className = 'record-button recording';
+            recordingIndicator.classList.add('active');
+            recordingStartTime = Date.now();
+            
+            // Start recording timer
+            recordingTimer = setInterval(updateRecordingTimer, 100);
+            
+            mediaRecorder.start();
+        }
+
+        // Stop recording
+        function stopRecording() {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            recordButton.className = 'record-button processing';
+            recordingIndicator.classList.remove('active');
+            
+            clearInterval(recordingTimer);
+            recordingTimerDisplay.textContent = '00:00';
+            
+            mediaRecorder.stop();
+            
+            // Reset button after processing
+            setTimeout(() => {
+                recordButton.className = 'record-button idle';
+            }, 1000);
+        }
+
+        // Update recording timer
+        function updateRecordingTimer() {
+            if (!recordingStartTime) return;
+            
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const seconds = (elapsed % 60).toString().padStart(2, '0');
+            recordingTimerDisplay.textContent = `${minutes}:${seconds}`;
+        }
+
+        // Send text message
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+            
+            // Stop any currently playing audio
+            stopCurrentAudio();
+            
+            addMessage(text, true);
+            messageInput.value = '';
+            
+            // Simulate bot response
+            setTimeout(() => {
+                const responses = [
+                    "I received your message. How can I assist you further?",
+                    "That's interesting! Tell me more about what you need.",
+                    "I'm processing your request. Please wait a moment...",
+                    "Thanks for your input! Here's what I found:",
+                    "I understand. Let me help you with that."
+                ];
+                const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+                addMessage(randomResponse);
+            }, 1000);
+        }
+
+        // Event listeners
+        recordButton.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        sendButton.addEventListener('click', sendMessage);
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Navigation click handlers
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                this.classList.add('active');
+                console.log('Navigated to:', this.textContent.trim());
+                
+                // Close sidebar on mobile after navigation
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.remove('active');
+                    sidebarOverlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                }
+            });
+        });
+
+        // Mobile responsiveness
+        function handleResize() {
+            if (window.innerWidth <= 768) {
+                // Mobile mode
+                sidebar.classList.remove('collapsed');
+                sidebar.classList.remove('active'); // Ensure sidebar is hidden initially on mobile
+                mainContent.classList.add('expanded');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            } else {
+                // Desktop mode
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+                
+                if (!sidebarCollapsed) {
+                    sidebar.classList.remove('collapsed');
+                    mainContent.classList.remove('expanded');
+                } else {
+                    sidebar.classList.add('collapsed');
+                    mainContent.classList.add('expanded');
+                }
+            }
+        }
+
+        window.addEventListener('resize', handleResize);
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            handleResize();
+            initializeAudio();
+        });
+
+        // Prevent body scroll when sidebar is open on mobile
+        function preventBodyScroll(e) {
+            if (sidebar.classList.contains('active') && window.innerWidth <= 768) {
+                if (!sidebar.contains(e.target)) {
+                    e.preventDefault();
+                }
+            }
+        }
+
+        document.addEventListener('touchmove', preventBodyScroll, { passive: false });
+
+        // Cleanup when page unloads
+        window.addEventListener('beforeunload', () => {
+            // Stop any playing audio and cleanup resources
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
+            audioInstances.forEach(audio => {
+                audio.pause();
+                audio.src = '';
+            });
+            audioInstances.clear();
+            
+            // Cleanup recording
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            
+            // Reset body overflow
+            document.body.style.overflow = '';
+        });
+
+        const ws = new WebSocket("ws://localhost:80/ws");
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === "bot") {
+                addMessage(data.content, false); // false = not user
+            }
+        };
+
+
+    </script>
 </body>
 </html>
