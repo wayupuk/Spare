@@ -36,5 +36,5 @@ Install Ngrok via: [Ngrok](https://ngrok.com/)
 ```bash
 ngrok config add-authtoken <authen-token>
 
-ngrok http http://localhost:$PORT ### ngrok http http://localhost:8000
+ngrok http http://localhost:$PORT ### ngrok http http://localhost:8000 use a port that you choose
 ```
