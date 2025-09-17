@@ -27,3 +27,14 @@ pip install uvicorn
 uvicorn main:app --host 0.0.0.0 --port 80 --reload
 ```
 to run with uvicorn
+
+
+# Run global with ngrok
+
+Install Ngrok via:
+
+```bash
+ngrok config add-authtoken <authen-token>
+
+ngrok http http://localhost:$PORT ### ngrok http http://localhost:$PORT
+```
