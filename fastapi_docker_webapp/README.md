@@ -31,7 +31,7 @@ to run with uvicorn
 
 # Run global with ngrok
 
-Install Ngrok via:
+Install Ngrok via: [Ngrok](https://ngrok.com/)
 
 ```bash
 ngrok config add-authtoken <authen-token>
