@@ -211,11 +211,11 @@ async def dummy_bot(payload: PredictRequest):
         
         outputs = model(batch_x.double().to(device))
         text = content[str(torch.argmax(outputs).item())]
-        result = {"received":text}
-        output = seq.predict("ศรา้งประโยค" + text)[0]
+        output = seq.predict("ศรา้งประโยค" + text) #####test
+        # output = seq.predict("เรียงประดยคนี้ให้หนอย " + text)["generated_text"][0]
         
-        print(text)
-        data = TTS(output,
+        print(output)
+        audio_profile = TTS(output[0]["generated_text"],
             voice="th_f_1",
             output="output.wav",
             volume=5.0,
@@ -223,7 +223,7 @@ async def dummy_bot(payload: PredictRequest):
             
         )
         
-        for i in data:
+        for i in audio_profile:
             wav = i.audio_float_array
             sr = i.sample_rate
         buf = io.BytesIO()
