@@ -13,7 +13,6 @@ print(os.curdir)
 print(os.listdir("./"))
 from pathlib import Path
 from asset.utils import S2S,RapidChangeWindowClassifier,CNNTimeSeriesClassifier,Thonburain
-from f5_tts.api import F5TTS
 import base64
 import torch
 import json
@@ -21,9 +20,7 @@ import yaml
 import soundfile as sf
 import io
 from pydub import AudioSegment
-import librosa
 import numpy as np
-# from pythaitts import TTS
 from vachanatts import TTS
 "-----------------------------------------"
 ### initial path
@@ -71,7 +68,7 @@ model.eval()
 
 with open(rollback,"r",encoding='utf-8') as f:
         content = json.load(f)
-# seq = S2S(seq_name)
+seq = S2S(seq_name)
 # f5_tts = F5TTS(
 #     ckpt_file=ft_model,
 #     vocab_file=vocab_file
@@ -215,10 +212,10 @@ async def dummy_bot(payload: PredictRequest):
         outputs = model(batch_x.double().to(device))
         text = content[str(torch.argmax(outputs).item())]
         result = {"received":text}
-        
+        output = seq.predict("ศรา้งประโยค" + text)[0]
         
         print(text)
-        data = TTS("คำว่า "+text,
+        data = TTS(output,
             voice="th_f_1",
             output="output.wav",
             volume=5.0,
@@ -264,8 +261,7 @@ async def dummy_bot(payload: PredictRequest):
     
 #     global f5_tts
     
-#     result = {"texts":request.texts}
-#     output = seq.predict(request.texts)
+
 #     result["outputs"] = output
 #     print(output)
 #     text = output[0][0]["generated_text"]

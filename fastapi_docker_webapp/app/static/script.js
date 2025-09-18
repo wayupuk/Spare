@@ -643,31 +643,36 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('touchmove', preventBodyScroll, { passive: false });
 
     // WebSocket connection
-    const ws = new WebSocket("ws://https://7bb3d40318dd.ngrok-free.app/ws");
+    let wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    let wsHost = window.location.host;  // fdf7484d6f96.ngrok-free.app
+
+    const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "bot") {
             addMessage(data.content, false); // false = not user
         }
-    };
-    if (data.type === "bot_audio") {
-        // Base64 decode to binary
-        const binaryString = atob(data.content);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+    
+        if (data.type === "bot_audio") {
+            // Base64 decode to binary
+            const binaryString = atob(data.content);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const audioBlob = new Blob([bytes.buffer], { type: "audio/wav" });
+
+            // Auto-play
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const autoPlay = new Audio(audioUrl);
+            autoPlay.play();
+
+            // Add message with replay controls
+            addMessage("", false, true, audioBlob);
         }
-        const audioBlob = new Blob([bytes.buffer], { type: "audio/wav" });
 
-        // Auto-play
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const autoPlay = new Audio(audioUrl);
-        autoPlay.play();
-
-        // Add message with replay controls
-        addMessage("", false, true, audioBlob);
-    }
+    };
 });
 
 // Cleanup when page unloads
