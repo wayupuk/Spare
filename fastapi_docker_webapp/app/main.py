@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form,UploadFile, File,WebSocketDisconnect,WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse,StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import List, Optional
@@ -9,10 +9,12 @@ from importlib.resources import files
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+print(os.curdir)
+print(os.listdir("./"))
 from pathlib import Path
 from asset.utils import S2S,RapidChangeWindowClassifier,CNNTimeSeriesClassifier,Thonburain
 from f5_tts.api import F5TTS
-print(os.curdir)
+import base64
 import torch
 import json
 import yaml
@@ -21,6 +23,8 @@ import io
 from pydub import AudioSegment
 import librosa
 import numpy as np
+# from pythaitts import TTS
+from vachanatts import TTS
 "-----------------------------------------"
 ### initial path
 with open("./asset/config.yaml", 'r') as file:
@@ -70,9 +74,10 @@ with open(rollback,"r",encoding='utf-8') as f:
 # seq = S2S(seq_name)
 # f5_tts = F5TTS(
 #     ckpt_file=ft_model,
-#         vocab_file=vocab_file
+#     vocab_file=vocab_file
         
 # )
+# tts = TTS()
 asr = Thonburain(asr_path)
 print("Ready to use")
 "------------------------------------------"
@@ -179,7 +184,7 @@ async def websocket_endpoint(websocket: WebSocket):
         clients.remove(websocket)
 
 # API endpoint that dummy_bot can call
-@app.post("/dummy_bot")
+@app.post("/predict_hand")
 async def dummy_bot(payload: PredictRequest):
 
 
@@ -211,19 +216,47 @@ async def dummy_bot(payload: PredictRequest):
         text = content[str(torch.argmax(outputs).item())]
         result = {"received":text}
         
-        for client in clients:
-            await client.send_json({"type": "bot", "content": text})
+        
+        print(text)
+        data = TTS("คำว่า "+text,
+            voice="th_f_1",
+            output="output.wav",
+            volume=5.0,
+            speed=0.8,
             
-            
+        )
+        
+        for i in data:
+            wav = i.audio_float_array
+            sr = i.sample_rate
+        buf = io.BytesIO()
+        buf = io.BytesIO()
+        print("audio output",wav)
+        sf.write(buf, wav, sr, format="WAV")
+        sf.write('output.wav', wav, sr)
+        buf.seek(0)
+
+        # Base64 encode WAV
+        audio_bytes = buf.read()
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        # print(audio_b64)
         predictions = []
         data = []
         ft = []
         sta = []
         state = False
+        for ws in clients:
+            await ws.send_json({"type": "bot_audio", "content": audio_b64})
+
+            
+        
+        # for client in clients:
+        #     await client.send_json({"type": "bot", "content": text})
+
     else:
         result = {"received":len(data)}
         return result
-    return {"status": "ok"}
+    return {"status": text}
 
 
 # @app.post("/tts")
