@@ -448,9 +448,18 @@ function stopRecording() {
     }, 1000);
 }
 
-function startHandRecording() {
+async function startHandRecording() {
     console.log(getSelectedDevice())
     console.log(userPerMissionId)
+
+
+    const response = await fetch("/HandRecordStatus",{
+        method: "POST",
+            body:JSON.stringify({ status: true })
+        }
+    )
+    const data = await response.json();
+    console.log(data)
 
     if (getSelectedDevice() != userPerMissionId){
         showError("Please select the correct device to start recording.")
@@ -471,10 +480,18 @@ function startHandRecording() {
 
     // mediaRecorder.start();
 }
-function stopHandRecording() {
+async function stopHandRecording() {
     // if (!isRecordingHand) return;
 
     isRecordingHand = false;
+    const response = await fetch("/HandRecordStatus",{
+        method: "POST",
+        body:JSON.stringify({ status: false }),
+        }
+    )
+    const data = await response.json();
+    console.log(data)
+
     recordHandButton.className = 'record-hand-button idle';
     recordingIndicator.classList.remove('active');
 
@@ -669,6 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
             autoPlay.play();
 
             // Add message with replay controls
+            addMessage(data.text, false, false, audioBlob);
             addMessage("", false, true, audioBlob);
         }
 

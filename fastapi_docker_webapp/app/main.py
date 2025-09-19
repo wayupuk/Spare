@@ -22,6 +22,7 @@ import io
 from pydub import AudioSegment
 import numpy as np
 from vachanatts import TTS
+from collections import deque
 "-----------------------------------------"
 ### initial path
 with open("./asset/config.yaml", 'r') as file:
@@ -50,8 +51,12 @@ ft = []
 sta = []
 state = False
 a = []
-thes = 5
+thes = 2
 clients = []
+text_list = []
+isRecordingHand = ""
+pyLoadResiveBuffer = ""
+text = ""
 if torch.cuda.is_available():
     weight = torch.load(shl_path,weights_only=True)
     model.load_state_dict(weight)
@@ -127,40 +132,43 @@ async def view_logs(request: Request, lines: int = 200):
             logs = "".join(f.readlines()[-n:])
     return templates.TemplateResponse("logs.html", {"request": request, "logs": logs})
 
-# @app.post("/predict")
-# async def predict_api(payload: PredictRequest):
-    
-#     global predictions
-#     global data 
-#     global ft
-#     global sta
-#     global state 
-#     global a 
-#     global thes 
-    
-    
-#     logger.info(f"/predict called (api) with text={payload.feature}")
-#     # result = {"received": payload.feature, "length": len(payload.feature)}
-#     # logger.info(f"/predict result: {result}")
-#     rows = payload.feature
-#     logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
-#     ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
-#     # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
-    
-#     if state==True and len(ft)>=thes and len(predictions) > 10:
+def pop_from_queue_in_range(queue_obj, num_to_pop):
+    """
+    Removes a specified number of elements from the front of a deque-based queue.
+
+    Args:
+        queue_obj (deque): The deque object representing the queue.
+        num_to_pop (int): The number of elements to remove from the front.
+
+    Returns:
+        list: A list containing the popped elements.
+    """
+    popped_elements = []
+    for _ in range(num_to_pop):
+        try:
+            popped_elements.append(queue_obj.popleft())
+        except IndexError:
+            # Handle case where queue becomes empty before popping all requested items
+            print("Queue is empty, stopped popping.")
+            break
+    return popped_elements
+
+
+# pyLoadResiveBuffer = deque()
+
+@app.post("/HandRecordStatus")
+async def health(payload: Request):
+    global isRecordingHand 
+    global pyLoadResiveBuffer
+    dat = await payload.json()
+    print(dat["status"])
+    if dat["status"] == True:
+        isRecordingHand = True
+    else:
+        isRecordingHand = False
+        pyLoadResiveBuffer = deque()
         
-#         sequence = classifier.padding(data,thes)
-#         # print(sequence)
-#         batch_x = torch.from_numpy(sequence)
-#         batch_x = batch_x[:,1:].unsqueeze(0)
-        
-#         outputs = model(batch_x.double().to(device))
-#         text = content[str(torch.argmax(outputs).item())]
-#         result = {"received":text}
-#     else:
-#         result = {"received":len(data)}
-    
-#     return JSONResponse(result)
+    return {"status": "samples", "info": isRecordingHand}
 
 @app.post("/predict-form")
 async def predict_form(request: Request, text: str = Form(...)):
@@ -192,33 +200,52 @@ async def dummy_bot(payload: PredictRequest):
     global state 
     global a 
     global thes 
+    global text_list
+    global text
     
-    
-    # logger.info(f"/predict called (api) with text={payload.feature}")
-    # result = {"received": payload.feature, "length": len(payload.feature)}
-    # logger.info(f"/predict result: {result}")
-    rows = payload.feature
+    print(isRecordingHand)
+    if isRecordingHand:
+        rows = payload.feature
+        # print(rows)
+        print("1")
     # logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
-    ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
-    # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
-    
-    if state==True and len(ft)>=thes and len(predictions) > 40+thes:
+        ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
+        # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
         
-        sequence = classifier.padding(data,thes)
-        # print(sequence)
-        batch_x = torch.from_numpy(sequence)
-        batch_x = batch_x[:,1:].unsqueeze(0)
         
-        outputs = model(batch_x.double().to(device))
-        text = content[str(torch.argmax(outputs).item())]
-        output = seq.predict("ศรา้งประโยค" + text) #####test
-        # output = seq.predict("เรียงประดยคนี้ให้หนอย " + text)["generated_text"][0]
+        print(state,len(ft),len(predictions))
+        
+        if state==True and len(ft)>=thes and len(predictions) > 40+thes:
+            
+            sequence = classifier.padding(data,thes)
+            # print(sequence)
+            batch_x = torch.from_numpy(sequence)
+            batch_x = batch_x[:,1:].unsqueeze(0)
+            
+            outputs = model(batch_x.double().to(device))
+            text = content[str(torch.argmax(outputs).item())]
+            
+            
+            
+            print("now: ",text)
+            # output = seq.predict("ศรา้งประโยค" + text) #####test
+            text_list.append(text)
+            predictions = []
+            data = []
+            ft = []
+            sta = []
+            state = False
+            
+    elif not isRecordingHand and (len(text_list) != 0):
+        print(text_list)
+        print("2")
+        output = seq.predict("เรียงประดยคนี้ให้หนอย " + " ".join(text_list))
         
         print(output)
         audio_profile = TTS(output[0]["generated_text"],
             voice="th_f_1",
             output="output.wav",
-            volume=5.0,
+            volume=2.0,
             speed=0.8,
             
         )
@@ -237,13 +264,10 @@ async def dummy_bot(payload: PredictRequest):
         audio_bytes = buf.read()
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
         # print(audio_b64)
-        predictions = []
-        data = []
-        ft = []
-        sta = []
-        state = False
+
         for ws in clients:
-            await ws.send_json({"type": "bot_audio", "content": audio_b64})
+            print("send to webssocke")
+            await ws.send_json({"type": "bot_audio", "content": audio_b64,"text":" ".join(text_list)})
 
             
         
@@ -251,32 +275,12 @@ async def dummy_bot(payload: PredictRequest):
         #     await client.send_json({"type": "bot", "content": text})
 
     else:
+        print("3")
         result = {"received":len(data)}
         return result
-    return {"status": text}
+    return {"status": len(data)}
 
 
-# @app.post("/tts")
-# async def predict_form(request: Text_voice):
-    
-#     global f5_tts
-    
-
-#     result["outputs"] = output
-#     print(output)
-#     text = output[0][0]["generated_text"]
-#     wav, sr, spect = f5_tts.infer(
-#         # ref_file=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
-#         ref_file=r"F:\Hybridmodel-project\Sign_Language_Detection\fastapi_docker_webapp\app\f5_tts\infer\examples\basic\basic_ref_en.wav",
-#         ref_text="some call me nature, others call me mother nature.",
-#         gen_text=text,
-#         # file_wave=str(files("f5_tts").joinpath("../../tests/api_out.wav")),
-#         # file_spect=str(files("f5_tts").joinpath("../../tests/api_out.png")),
-#         # seed=-1,  # random seed = -1
-#     )
-#     result["signal"] = len(wav)
-    
-#     return JSONResponse(result)
 
 
 @app.post("/upload-audio")

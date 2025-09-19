@@ -11097,4 +11097,4 @@ tts,ทีทีเอส
 costefficient,คอสต์อีเอฟฟายซีไอเอ็นท์
 apachelicensed,เอพีเอซีฮีไลซ์เอ็นเอสเอ็ด
 deployed,เดอพีแอลโอเยดี
-vachana,วาจานะ
+vachana,วาจานะpaulish,พอลอีสเอช
