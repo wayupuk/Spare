@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Form,UploadFile, File,WebSocketDisconnect,
 from fastapi.responses import HTMLResponse, JSONResponse,StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from typing import List, Optional
+from typing import List, Optional , Annotated
 from pydantic import BaseModel
 from typing import Optional
 from importlib.resources import files
@@ -23,6 +23,8 @@ from pydub import AudioSegment
 import numpy as np
 from vachanatts import TTS
 from collections import deque
+import soundfile as sf
+import pandas as pd
 "-----------------------------------------"
 ### initial path
 with open("./asset/config.yaml", 'r') as file:
@@ -101,7 +103,6 @@ app = FastAPI()
     # app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 templates = Jinja2Templates(directory="static")
-print(templates)
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
@@ -161,7 +162,6 @@ async def health(payload: Request):
     global isRecordingHand 
     global pyLoadResiveBuffer
     dat = await payload.json()
-    print(dat["status"])
     if dat["status"] == True:
         isRecordingHand = True
     else:
@@ -210,11 +210,6 @@ async def dummy_bot(payload: PredictRequest):
         print("1")
     # logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
         ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
-        # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
-        
-        
-        print(state,len(ft),len(predictions))
-        
         if state==True and len(ft)>=thes and len(predictions) > 40+thes:
             
             sequence = classifier.padding(data,thes)
@@ -224,10 +219,6 @@ async def dummy_bot(payload: PredictRequest):
             
             outputs = model(batch_x.double().to(device))
             text = content[str(torch.argmax(outputs).item())]
-            
-            
-            
-            print("now: ",text)
             # output = seq.predict("ศรา้งประโยค" + text) #####test
             text_list.append(text)
             predictions = []
@@ -237,11 +228,8 @@ async def dummy_bot(payload: PredictRequest):
             state = False
             
     elif not isRecordingHand and (len(text_list) != 0):
-        print(text_list)
-        print("2")
-        output = seq.predict("เรียงประดยคนี้ให้หนอย " + " ".join(text_list))
+        output = seq.predict("เรียงประโยคนี้ให้หนอย " + " ".join(text_list))
         
-        print(output)
         audio_profile = TTS(output[0]["generated_text"],
             voice="th_f_1",
             output="output.wav",
@@ -255,7 +243,6 @@ async def dummy_bot(payload: PredictRequest):
             sr = i.sample_rate
         buf = io.BytesIO()
         buf = io.BytesIO()
-        print("audio output",wav)
         sf.write(buf, wav, sr, format="WAV")
         sf.write('output.wav', wav, sr)
         buf.seek(0)
@@ -275,7 +262,6 @@ async def dummy_bot(payload: PredictRequest):
         #     await client.send_json({"type": "bot", "content": text})
 
     else:
-        print("3")
         result = {"received":len(data)}
         return result
     return {"status": len(data)}
@@ -302,11 +288,103 @@ async def upload_audio(request: Request):
     return {"status": "samples", "info": output}
 
 
+@app.post("/upload-files")
+async def upload_audio(file: Annotated[UploadFile,File(description="A file read as UploadFile")]):
+    # file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
+    
+    
+    
+    wav = await file.read()
+    # print(io.BytesIO(wav))
+    wav,fs = sf.read(io.BytesIO(wav))
+    wav = wav.flatten()
+    output = asr.predict(wav,fs)
+    
+    {"status": "samples", "info": output}
+    return {"status": "samples", "info": output}
+
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-# if __name__ == '__main__':
-#     app.run(host='0.0.0.0', port=5000, debug=True)
+@app.post("/predict_csv")
+async def dummy_bot(file: Annotated[UploadFile,File(description="A file read as UploadFile")]):
+
+
+    global predictions
+    global data 
+    global ft
+    global sta
+    global state 
+    global a 
+    global thes 
+    global text_list
+    global text
+    
+    contents = await file.read()
+    csv_string = contents.decode('utf-8')
+    csv_file = io.StringIO(csv_string)
+
+    df = pd.read_csv(csv_file)
+    
+    for i in range(0,len(df),25):
+        rows = df.iloc[i*25:(i+1)*25].values[:,:29 - len(df.columns)]
+    # logger.info(f"/aloha result: ",ft,predictions,data,sta,state)
+        ft,predictions,data,sta,state = classifier.pred(rows,predictions,data,ft,state,sta)
+        # logger.info(f"/aloha result-end: ",ft,predictions,data,sta,state)
+        
+        
+        if state==True and len(ft)>=thes and len(predictions) > 40+thes:
+            
+            sequence = classifier.padding(data,thes)
+            # print(sequence)
+            batch_x = torch.from_numpy(sequence)
+            batch_x = batch_x[:,1:].unsqueeze(0)
+            
+            outputs = model(batch_x.double().to(device))
+            text = content[str(torch.argmax(outputs).item())]
+        
+        
+        
+            # output = seq.predict("ศรา้งประโยค" + text) #####test
+            text_list.append(text)
+            predictions = []
+            data = []
+            ft = []
+            sta = []
+            state = False
+    output = seq.predict("เรียงประโยคนี้ให้หนอย " + " ".join(text_list))
+    
+    audio_profile = TTS(output[0]["generated_text"],
+        voice="th_f_1",
+        output="output.wav",
+        volume=2.0,
+        speed=0.8,
+        
+    )
+    
+    for i in audio_profile:
+        wav = i.audio_float_array
+        sr = i.sample_rate
+    buf = io.BytesIO()
+    buf = io.BytesIO()
+    sf.write(buf, wav, sr, format="WAV")
+    sf.write('output.wav', wav, sr)
+    buf.seek(0)
+
+    # Base64 encode WAV
+    audio_bytes = buf.read()
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    # print(audio_b64)
+
+    for ws in clients:
+        await ws.send_json({"type": "bot_audio", "content": audio_b64,"text":" ".join(text_list)})
+
+            
+
+    else:
+        result = {"received":len(data)}
+        return result

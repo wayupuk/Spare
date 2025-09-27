@@ -11,7 +11,7 @@ let currentAudioId = null;
 let audioInstances = new Map();
 
 let userPerMissionId = 1595123198513;
-let deviceStatus = false
+let deviceStatus = true
 const devices = [
   { id: 1595123198513, label: 'MOCAP_test_device_1' },
   { id: 5465198512316, label: 'MOCAP_test_device_2' },
@@ -19,7 +19,79 @@ const devices = [
   { id: 1695198515615, label: 'MOCAP_test_device_4' }
 ];
 
+// Global variables for spinner system
+let activeSpinners = new Map();
 
+// Global variables for progress tracking
+let activeProgressMessages = new Map();
+let progressUpdateIntervals = new Map();
+
+// Store uploaded files for download
+const uploadedFiles = new Map();
+
+// CSS for the spinner system
+const spinnerCSS = `
+.bot-spinner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e2e8f0;
+    border-top: 2px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spinner-text {
+    color: #64748b;
+    font-style: italic;
+}
+
+.typing-dots {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.typing-dots span {
+    width: 4px;
+    height: 4px;
+    background: #64748b;
+    border-radius: 50%;
+    animation: typingDots 1.4s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+.typing-dots span:nth-child(3) { animation-delay: 0s; }
+
+@keyframes typingDots {
+    0%, 80%, 100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+`;
+
+// Inject CSS if not already added
+if (!document.getElementById('spinner-styles')) {
+    const styleSheet = document.createElement('style');
+    styleSheet.id = 'spinner-styles';
+    styleSheet.textContent = spinnerCSS;
+    document.head.appendChild(styleSheet);
+}
 
 // Get the select element from the DOM
 const selectElement = document.getElementById('deviceSelect');
@@ -35,6 +107,7 @@ devices.forEach(device => {
     // Add the new option to the select bar
     selectElement.appendChild(option);
 });
+
 // DOM elements
 const statusDot = document.getElementById("statusDot")
 const messageInput = document.getElementById('messageInput');
@@ -47,6 +120,9 @@ const recordingTimerDisplay = document.getElementById('recordingTimer');
 const sidebar = document.getElementById('sidebar');
 const mainContent = document.getElementById('mainContent');
 const sidebarOverlay = document.getElementById('sidebarOverlay');
+const fileInput = document.getElementById('fileInput');
+const fileInfo = document.getElementById('fileInfo');
+const fileList = document.getElementById('fileList');
 
 if(deviceStatus){
     statusDot.className = "status-dot online"
@@ -54,6 +130,7 @@ if(deviceStatus){
 else{
     statusDot.className = "status-dot offlin"
 }
+
 // Initialize audio recording
 async function initializeAudio() {
     try {
@@ -335,29 +412,116 @@ function addMessage(text, isUser = false, isAudio = false, audioBlob = null) {
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
-// // Handle audio recording
-// function handleAudioRecording(audioBlob) {
-//     // Add audio message to chat
-//     addMessage('', true, true, audioBlob);
+
+// SPINNER SYSTEM FUNCTIONS
+
+// Add bot response with spinner
+function addBotSpinner(message = "Processing your request", spinnerType = "spinner") {
+    const messageDiv = document.createElement('div');
+    const messageId = 'spinner-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    messageDiv.className = 'message bot-message';
+    messageDiv.id = messageId;
     
-//     // Here you would typically send the audio to your FastAPI backend
-//     // For demo purposes, we'll simulate a response
-//     setTimeout(() => {
-//         const responses = [
-//             "I received your audio message. Let me process that for you.",
-//             "Thanks for the voice message! I'm analyzing what you said.",
-//             "I heard your audio. Here's my response based on what you recorded.",
-//             "Voice message received and processed successfully!"
-//         ];
-//         const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-//         addMessage(randomResponse);
-//     }, 1500);
-// }
+    const currentTime = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    let spinnerHTML = '';
+    if (spinnerType === "spinner") {
+        spinnerHTML = `
+            <div class="bot-spinner">
+                <div class="spinner"></div>
+                <span class="spinner-text">${message}</span>
+            </div>
+        `;
+    } else if (spinnerType === "dots") {
+        spinnerHTML = `
+            <div class="bot-spinner">
+                <span class="spinner-text">${message}</span>
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        `;
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="message-avatar">
+            <div class="avatar-icon">🤖</div>
+        </div>
+        <div class="message-content">
+            <div class="message-text">
+                ${spinnerHTML}
+            </div>
+            <div class="message-time">${currentTime}</div>
+        </div>
+    `;
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // Store reference for later removal
+    activeSpinners.set(messageId, {
+        element: messageDiv,
+        message: message,
+        startTime: Date.now()
+    });
+    
+    return messageId;
+}
 
+// Remove spinner and add actual bot response
+function removeBotSpinner(spinnerId, finalMessage,type="bot") {
+    const spinnerInfo = activeSpinners.get(spinnerId);
+    if (!spinnerInfo) return;
+    
+    // Remove the spinner message
+    if (spinnerInfo.element && spinnerInfo.element.parentNode) {
+        spinnerInfo.element.parentNode.removeChild(spinnerInfo.element);
+    }
+    
+    // Add the actual bot response
+    if (type == "bot"){
+    addMessage(finalMessage, false);
+    }else{
+    addMessage(finalMessage, true);
+    }
+    
+    // Clean up
+    activeSpinners.delete(spinnerId);
+}
 
+// Update spinner message
+function updateBotSpinner(spinnerId, newMessage) {
+    const spinnerInfo = activeSpinners.get(spinnerId);
+    if (!spinnerInfo) return;
+    
+    const spinnerText = spinnerInfo.element.querySelector('.spinner-text');
+    if (spinnerText) {
+        spinnerText.textContent = newMessage;
+        spinnerInfo.message = newMessage;
+    }
+}
+
+// Remove all active spinners
+function removeAllSpinners() {
+    activeSpinners.forEach((spinnerInfo, spinnerId) => {
+        if (spinnerInfo.element && spinnerInfo.element.parentNode) {
+            spinnerInfo.element.parentNode.removeChild(spinnerInfo.element);
+        }
+    });
+    activeSpinners.clear();
+}
+
+// Modified handleAudioRecording with spinner
 async function handleAudioRecording(audioBlob) {
     try {
+        // Add audio message to chat first
         addMessage('', true, true, audioBlob);
+        
+        // Show spinner while processing
+        const spinnerId = addBotSpinner("Processing your audio message", "spinner");
+        
         const arrayBuffer = await audioBlob.arrayBuffer();
         const response = await fetch("/upload-audio", {
             method: "POST",
@@ -370,30 +534,16 @@ async function handleAudioRecording(audioBlob) {
         const result = await response.json();
         console.log("Server response:", result);
 
-        addMessage(result.info, true);
+        // Remove spinner and show result
+        removeBotSpinner(spinnerId, result.info,"user");
 
     } catch (err) {
-        // Create temporary error message
-        const errorMsg = document.createElement('div');
-        errorMsg.className = 'message bot-message';
-        errorMsg.innerHTML = `
-            <div class="message-avatar">
-                <div class="avatar-icon">⚠️</div>
-            </div>
-            <div class="message-content">
-                <div class="message-text">There was an error uploading your audio. Please try again.</div>
-                <div class="message-time">Just now</div>
-            </div>
-        `;
-        chatMessages.appendChild(errorMsg);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-
-        // Remove message after 2 seconds
-        setTimeout(() => {
-            if (errorMsg.parentNode) {
-                errorMsg.parentNode.removeChild(errorMsg);
-            }
-        }, 2000);
+        // Remove spinner and show error
+        const activeSpinnerIds = Array.from(activeSpinners.keys());
+        if (activeSpinnerIds.length > 0) {
+            removeBotSpinner(activeSpinnerIds[activeSpinnerIds.length - 1], "There was an error processing your audio. Please try again.","user");
+        }
+        console.error("Upload failed:", err);
     }
 }
 
@@ -452,7 +602,6 @@ async function startHandRecording() {
     console.log(getSelectedDevice())
     console.log(userPerMissionId)
 
-
     const response = await fetch("/HandRecordStatus",{
         method: "POST",
             body:JSON.stringify({ status: true })
@@ -463,7 +612,6 @@ async function startHandRecording() {
 
     if (getSelectedDevice() != userPerMissionId){
         showError("Please select the correct device to start recording.")
-        // alert('Please select the correct device to start recording.');
         return;
     }
 
@@ -477,12 +625,9 @@ async function startHandRecording() {
 
     // Start recording timer
     recordingTimer = setInterval(updateRecordingTimer, 100);
-
-    // mediaRecorder.start();
 }
-async function stopHandRecording() {
-    // if (!isRecordingHand) return;
 
+async function stopHandRecording() {
     isRecordingHand = false;
     const response = await fetch("/HandRecordStatus",{
         method: "POST",
@@ -497,8 +642,6 @@ async function stopHandRecording() {
 
     clearInterval(recordingTimer);
     recordingTimerDisplay.textContent = '00:00';
-
-    // mediaRecorder.stop();
 
     // Reset button after processing
     setTimeout(() => {
@@ -516,7 +659,7 @@ function updateRecordingTimer() {
     recordingTimerDisplay.textContent = `${minutes}:${seconds}`;
 }
 
-// Send text message
+// Modified send message with spinner for bot responses
 function sendMessage() {
     const text = messageInput.value.trim();
     if (!text) return;
@@ -524,10 +667,14 @@ function sendMessage() {
     // Stop any currently playing audio
     stopCurrentAudio();
     
+    // Add user message
     addMessage(text, true);
     messageInput.value = '';
     
-    // Simulate bot response
+    // Show spinner while "thinking"
+    const spinnerId = addBotSpinner("Thinking", "dots");
+    
+    // Simulate bot processing time
     setTimeout(() => {
         const responses = [
             "I received your message. How can I assist you further?",
@@ -537,8 +684,168 @@ function sendMessage() {
             "I understand. Let me help you with that."
         ];
         const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-        addMessage(randomResponse);
-    }, 1000);
+        
+        // Remove spinner and show response
+        removeBotSpinner(spinnerId, randomResponse,"bot");
+    }, 2000);
+}
+
+// Create file message displays in chat
+function createFileMessage(file, messageId) {
+    const fileType = file.name.toLowerCase().endsWith('.csv') ? 'CSV' : 'MP3';
+    const fileSize = (file.size / 1024 / 1024).toFixed(2);
+    const fileIcon = fileType === 'CSV' ? '📊' : '🎵';
+    
+    return `
+        <div class="file-message">
+            <div class="file-preview">
+                <div class="file-icon">${fileIcon}</div>
+                <div class="file-details">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-meta">
+                        <span class="file-type">${fileType}</span> • 
+                        <span class="file-size">${fileSize} MB</span>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="file-action-btn" onclick="downloadFile('${messageId}', '${file.name}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 12l-4-4h3V4h2v4h3l-4 4z"/>
+                            <path d="M2 14h12v2H2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Add file messages to chat
+function addFileMessage(files, isUser = true) {
+    Array.from(files).forEach(file => {
+        const messageDiv = document.createElement('div');
+        const messageId = 'file-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+        
+        // Store file for potential download
+        uploadedFiles.set(messageId, file);
+        
+        const currentTime = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        
+        messageDiv.innerHTML = `
+            <div class="message-avatar">
+                <div class="avatar-icon">${isUser ? '👤' : '🤖'}</div>
+            </div>
+            <div class="message-content">
+                ${createFileMessage(file, messageId)}
+                <div class="message-time">${currentTime}</div>
+            </div>
+        `;
+        
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    });
+}
+
+// Download function for files
+function downloadFile(messageId, fileName) {
+    const file = uploadedFiles.get(messageId);
+    if (file) {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+}
+
+function hideFileInfo() {
+    fileInfo.classList.remove('show');
+    setTimeout(() => {
+        fileInfo.style.display = 'none';
+    }, 300);
+}
+
+// Handle file processing
+function handleFileUpload(files) {
+    Array.from(files).forEach(file => {
+        if (file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')) {
+            console.log('Processing CSV file:', file.name);
+            processCsvFile(file);
+        } else if (file.type === 'audio/mp3' || file.name.toLowerCase().endsWith('.mp3')) {
+            console.log('Processing MP3 file:', file.name);
+            processMp3File(file);
+        }
+    });
+}
+
+function processCsvFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const csvContent = e.target.result;
+        console.log('CSV content loaded:', csvContent.substring(0, 100) + '...');
+    };
+    reader.readAsText(file);
+}
+
+function processMp3File(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const audioData = e.target.result;
+        console.log('MP3 file loaded, size:', audioData.byteLength);
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// Modified file upload with spinner
+async function handleFileUploadWithSpinner(files) {
+    const fileCount = files.length;
+    const name = files[0].name.toLowerCase()
+    if (name.endsWith(".mp3")) fileType = "MP3";
+    else if (name.endsWith(".wav")) fileType = "WAV";
+    else if (name.endsWith(".ogg")) fileType = "OGG";
+    else if (name.endsWith(".flac")) fileType = "FLAC";
+    else if (name.endsWith(".csv")) fileType = "csv";
+    
+    
+    // Show spinner
+    const spinnerId = addBotSpinner(`Processing ${fileCount} file${fileCount > 1 ? 's' : ''}`, "dots");
+
+    try {
+        const formData = new FormData();
+        formData.append("file", files[0]);
+        // Update spinner message
+        updateBotSpinner(spinnerId, "Uploading files to server");
+        
+
+
+        if (fileType != "csv") {
+        const response = await fetch("/upload-files", {
+            method: "POST",
+            body: formData
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            removeBotSpinner(spinnerId, result.info,"user");
+        } else {
+            throw new Error(`Upload failed: ${response.statusText}`);
+        }
+        }else{
+            
+            const response = await fetch("/predict_csv", {
+                method: "POST",
+                body: formData
+            });
+            removeBotSpinner(spinnerId, "","user");
+        }
+    } catch (error) {
+        console.error("File upload error:", error);
+        removeBotSpinner(spinnerId, "Sorry, there was an error processing your files. Please try again.","bot");
+    }
 }
 
 // Event listeners
@@ -622,7 +929,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.innerWidth <= 768) {
             // Mobile mode
             sidebar.classList.remove('collapsed');
-            sidebar.classList.remove('active'); // Ensure sidebar is hidden initially on mobile
+            sidebar.classList.remove('active');
             mainContent.classList.add('expanded');
             sidebarOverlay.classList.remove('active');
             document.body.style.overflow = '';
@@ -661,13 +968,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // WebSocket connection
     let wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    let wsHost = window.location.host;  // fdf7484d6f96.ngrok-free.app
+    let wsHost = window.location.host;
 
     const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.type === "bot") {
-            addMessage(data.content, false); // false = not user
+            addMessage(data.content, false);
         }
     
         if (data.type === "bot_audio") {
@@ -689,8 +996,10 @@ document.addEventListener('DOMContentLoaded', () => {
             addMessage(data.text, false, false, audioBlob);
             addMessage("", false, true, audioBlob);
         }
-
     };
+
+    // Initialize drag and drop
+    initializeDragAndDrop();
 });
 
 // Cleanup when page unloads
@@ -716,13 +1025,13 @@ window.addEventListener('beforeunload', () => {
     document.body.style.overflow = '';
 });
 
+// Notification System
 class NotificationSystem {
     constructor() {
         this.container = document.getElementById('notificationContainer');
     }
 
     show(message, duration = 3000) {
-        // Create notification element
         const notification = document.createElement('div');
         notification.className = 'notification';
         
@@ -732,20 +1041,16 @@ class NotificationSystem {
             <div class="notification-close">&times;</div>
         `;
 
-        // Add to container
         this.container.appendChild(notification);
 
-        // Trigger animation
         setTimeout(() => {
             notification.classList.add('show');
         }, 100);
 
-        // Auto-hide after duration
         const timeout = setTimeout(() => {
             this.hide(notification);
         }, duration);
 
-        // Close button handler
         const closeButton = notification.querySelector('.notification-close');
         closeButton.addEventListener('click', () => {
             clearTimeout(timeout);
@@ -766,50 +1071,181 @@ class NotificationSystem {
 // Initialize notification system
 const notificationSystem = new NotificationSystem();
 
-// Usage example in your error handling
-async function handleAudioRecording(audioBlob) {
-    try {
-        addMessage('', true, true, audioBlob);
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const response = await fetch("/upload-audio", {
-            method: "POST",
-            headers: {
-                "Content-Type": "audio/wav"
-            },
-            body: arrayBuffer
-        });
-
-        const result = await response.json();
-        console.log("Server response:", result);
-
-        addMessage(result.info, true);
-
-    } catch (err) {
-        // Use notification system instead of adding to chat
-        notificationSystem.show("There was an error uploading your audio. Please try again.");
-        console.error("Upload failed:", err);
-    }
-}
-
-// Example usage elsewhere
 function showError(message) {
     notificationSystem.show(message, 5000);
 }
-
 
 function getSelectedDevice() {
     const selectElement = document.getElementById('deviceSelect');
     return selectElement.value;
 }
 
-function createAudioPlayer(audioBlob, messageId) {
-    const url = URL.createObjectURL(audioBlob);
-    return `
-        <div class="audio-message">
-            <audio id="${messageId}" controls>
-                <source src="${url}" type="audio/wav">
-                Your browser does not support audio.
-            </audio>
+// File input event listener
+fileInput.addEventListener('change', function(e) {
+    const files = e.target.files;
+    
+    if (files.length > 0) {
+        // Add files to chat
+        addFileMessage(files, true);
+        
+        // Show temporary file info popup
+        fileInfo.style.display = 'block';
+        fileInfo.classList.add('show');
+        fileList.innerHTML = '';
+        
+        Array.from(files).forEach((file, index) => {
+            const fileType = file.name.toLowerCase().endsWith('.csv') ? 'CSV' : 'MP3';
+            const fileSize = (file.size / 1024 / 1024).toFixed(2);
+            
+            const fileItem = document.createElement('div');
+            fileItem.style.marginBottom = '6px';
+            fileItem.innerHTML = `
+                <span class="file-name">${file.name}</span> 
+                (<span class="file-type">${fileType}</span>, ${fileSize} MB)
+            `;
+            fileList.appendChild(fileItem);
+        });
+
+        // Process the files with spinner
+        handleFileUploadWithSpinner(files);
+
+        // Auto-hide popup after 3 seconds
+        setTimeout(() => {
+            hideFileInfo();
+        }, 3000);
+
+        // Clear the input for future uploads
+        fileInput.value = '';
+    }
+});
+
+// Updated send button handler to include file upload
+sendButton.addEventListener('click', function() {
+    // Send text message if there's text
+    const text = messageInput.value.trim();
+    if (text) {
+        sendMessage();
+    }
+    
+    // Process uploaded files if any
+    if (fileInput.files.length > 0) {
+        addFileMessage(fileInput.files, true);
+        handleFileUploadWithSpinner(fileInput.files);
+        fileInput.value = '';
+    }
+});
+
+// Drag and drop support
+function initializeDragAndDrop() {
+    const dropZone = chatMessages;
+    
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+    });
+    
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dropZone.style.backgroundColor = '';
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.backgroundColor = '';
+        
+        const files = Array.from(e.dataTransfer.files).filter(file => 
+            file.name.toLowerCase().endsWith('.csv') || 
+            file.name.toLowerCase().endsWith('.mp3')
+        );
+        
+        if (files.length > 0) {
+            const dt = new DataTransfer();
+            files.forEach(file => dt.items.add(file));
+            fileInput.files = dt.files;
+            
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    });
+}
+
+// Click outside to hide file info
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.upload-button') && !e.target.closest('.file-info')) {
+        hideFileInfo();
+    }
+});
+
+// Progress message system (if needed)
+function addProgressMessage(taskName, isUser = false) {
+    const messageDiv = document.createElement('div');
+    const messageId = 'progress-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+    messageDiv.id = messageId;
+    
+    const currentTime = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    messageDiv.innerHTML = `
+        <div class="message-avatar">
+            <div class="avatar-icon">${isUser ? '👤' : '🤖'}</div>
+        </div>
+        <div class="message-content">
+            <div class="progress-message">
+                <div class="progress-header">
+                    <div class="progress-title">${taskName}</div>
+                    <button class="progress-stop-btn" onclick="stopProgress('${messageId}')">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                            <rect x="2" y="2" width="10" height="10" rx="1"/>
+                        </svg>
+                        Stop
+                    </button>
+                </div>
+                <div class="progress-status" id="status-${messageId}">Initializing...</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progress-bar-${messageId}">
+                        <div class="progress-fill" id="progress-fill-${messageId}" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-percentage" id="progress-percent-${messageId}">0%</div>
+                </div>
+                <div class="progress-details" id="details-${messageId}">Starting process...</div>
+            </div>
+            <div class="message-time">${currentTime}</div>
         </div>
     `;
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    activeProgressMessages.set(messageId, {
+        element: messageDiv,
+        taskName: taskName,
+        startTime: Date.now(),
+        progress: 0,
+        status: 'running'
+    });
+    
+    return messageId;
 }
+
+// Test functions for debugging
+function testBotSpinner() {
+    const spinnerId = addBotSpinner("Testing spinner system", "spinner");
+    
+    setTimeout(() => {
+        updateBotSpinner(spinnerId, "Still processing");
+    }, 2000);
+    
+    setTimeout(() => {
+        removeBotSpinner(spinnerId, "Spinner test completed!","bot");
+    }, 4000);
+    
+    return spinnerId;
+}
+
+console.log('🤖 Chat system with spinner loaded');
+console.log('Available functions:');
+console.log('- testBotSpinner() - Test spinner system');
+console.log('- removeAllSpinners() - Clear all active spinners');
+
+// Add to window for console testing
+window.testBotSpinner = testBotSpinner;
+window.removeAllSpinners = removeAllSpinners;
