@@ -32,8 +32,8 @@ to run with uvicorn
 # Basic Knowledge
 
 Model
-Thonburain whisper link[https://github.com/biodatlab/thonburian-whisper]
-KhanommThan link[https://huggingface.co/pythainlp/KhanomTanLLM-1B]
+Thonburain whisper link[https://github.com/biodatlab/thonburian-whisper] \n
+KhanommThan link[https://huggingface.co/pythainlp/KhanomTanLLM-1B] \n
 Our model 
 will be kept in app/asset/model
 
