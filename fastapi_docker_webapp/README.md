@@ -32,17 +32,24 @@ to run with uvicorn
 # Basic Knowledge
 
 Model
-Thonburain whisper link[https://github.com/biodatlab/thonburian-whisper] \n
-KhanommThan link[https://huggingface.co/pythainlp/KhanomTanLLM-1B] \n
+Thonburain whisper link[https://github.com/biodatlab/thonburian-whisper] 
+
+KhanommThan link[https://huggingface.co/pythainlp/KhanomTanLLM-1B] 
+
 Our model 
+
 will be kept in app/asset/model
 
 Accuracy will be depended on datatype and model type and model size
+
 Speed will be depended on comupute unit (GPU)
+
 Template can b e found in app/static/index.html and css, javascript is there also.
 
 Rollback.json will be used to transform number from model prediction to text
+
 config.yaml use in path configuration
+
 utils.py is where the function we use
 
 vachanatts is a tts libs we use in this repo
