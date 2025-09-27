@@ -481,10 +481,12 @@ function removeBotSpinner(spinnerId, finalMessage,type="bot") {
     }
     
     // Add the actual bot response
-    if (type == "bot"){
-    addMessage(finalMessage, false);
-    }else{
-    addMessage(finalMessage, true);
+    if (finalMessage !=""){
+        if (type == "bot"){
+        addMessage(finalMessage, false);
+        }else{
+        addMessage(finalMessage, true);
+        }
     }
     
     // Clean up

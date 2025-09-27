@@ -25,6 +25,7 @@ from vachanatts import TTS
 from collections import deque
 import soundfile as sf
 import pandas as pd
+import time
 "-----------------------------------------"
 ### initial path
 with open("./asset/config.yaml", 'r') as file:
@@ -299,8 +300,9 @@ async def upload_audio(file: Annotated[UploadFile,File(description="A file read 
     # print(io.BytesIO(wav))
     wav,fs = sf.read(io.BytesIO(wav))
     wav = wav.flatten()
-    output = asr.predict(wav,fs)
-    
+    # output = asr.predict(wav,fs)
+    time.sleep(10)
+    output = "สวัสดีคับนี้คือเสียงที่เอาไว้ เทส ของทีม โมแคบ คับ"
     {"status": "samples", "info": output}
     return {"status": "samples", "info": output}
 
@@ -358,7 +360,9 @@ async def dummy_bot(file: Annotated[UploadFile,File(description="A file read as 
             state = False
     output = seq.predict("เรียงประโยคนี้ให้หนอย " + " ".join(text_list))
     
-    audio_profile = TTS(output[0]["generated_text"],
+    demo_text = "ฉันกินอาหาร"
+    # audio_profile = TTS(output[0]["generated_text"],
+    audio_profile = TTS(demo_text,
         voice="th_f_1",
         output="output.wav",
         volume=2.0,
@@ -379,9 +383,9 @@ async def dummy_bot(file: Annotated[UploadFile,File(description="A file read as 
     audio_bytes = buf.read()
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
     # print(audio_b64)
-
+    
     for ws in clients:
-        await ws.send_json({"type": "bot_audio", "content": audio_b64,"text":" ".join(text_list)})
+        await ws.send_json({"type": "bot_audio", "content": audio_b64,"text":demo_text})
 
             
 
