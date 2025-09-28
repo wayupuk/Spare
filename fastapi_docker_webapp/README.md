@@ -44,19 +44,24 @@ Accuracy will be depended on datatype and model type and model size
 
 Speed will be depended on comupute unit (GPU)
 
-Template can b e found in app/static/index.html and css, javascript is there also.
+Template can be found in app/static/index.html and css, javascript is there also.
 
-Rollback.json will be used to transform number from model prediction to text
+Rollback.json 
+> transform number from model prediction to text
 
-config.yaml use in path configuration
+config.yaml 
+> path configuration
 
-utils.py is where the function we use
+utils.py 
+> store function
 
-vachanatts is a tts libs we use in this repo
+vachanatts 
+> current tts folder
 
-main.py is a main programs that run the web application base-on fast-api
+main.py 
+> main program
 
-# Greate Reminder
+# Great Reminder
   The fall of accuracy occured from a testset that is less than we expect and need to test and data is not in a realword situation enough so the accuracy will be falling aprat when test on production in this case 89 -> 43 acc.
 
   Language model , TTS , ASR still lack of speed when test run due to the compute in lack. 
