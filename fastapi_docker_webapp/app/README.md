@@ -28,10 +28,12 @@ The icons in the web application are hand-sign, speech , upload file, send text
 
 # Web application text description
 
-RapidChange Classifier is used to classify if current value is active or not-active using sliding window, sliding window use the last N input to classify if current is active or not.
+**RapidChangeClassifier: ** 
+> is used to classify if current value is active or not-active using sliding window, sliding window use the last N input to classify if current is active or not.
 This function requires Acc,Gyro,Flex threshold and window size that denote by N.
 
-CNNTimeserieClassifier is a main model that we use in this program to classify sign language, it requires  to put ((chunk_size,feature),output) to clarify the model.
+**CNNTimeserieClassifier:**
+> is a main model that we use in this program to classify sign language, it requires  to put ((chunk_size,feature),output) to clarify the model.
 standard configuration is ((50,28),51)
 
 S2S function use to initial Language model for text ordering.
