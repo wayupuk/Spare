@@ -40,10 +40,6 @@ to run with uvicorn
 
 will be kept in app/asset/model
 
-Accuracy will be depended on datatype and model type and model size
-
-Speed will be depended on comupute unit (GPU)
-
 Template can be found in app/static/index.html and css, javascript is there also.
 
 Rollback.json 
@@ -63,9 +59,11 @@ main.py
 
 # Great Reminder
   The fall of accuracy occured from a testset that is less than we expect and need to test and data is not in a realword situation enough so the accuracy will be falling aprat when test on production in this case 89 -> 43 acc.
+  Accuracy will be depended on datatype and model type and model size. Speed will be depended on comupute unit (GPU)
 
   Language model , TTS , ASR still lack of speed when test run due to the compute in lack. 
 
 
   if you want to conitnue in this project please update a comput unit , plans and data first and every thing can keep continue easier
 
+  
