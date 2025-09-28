@@ -31,10 +31,11 @@ to run with uvicorn
 
 # Basic Knowledge
 
-Model
-Thonburain whisper link[https://github.com/biodatlab/thonburian-whisper] 
-
-KhanommThan link[https://huggingface.co/pythainlp/KhanomTanLLM-1B] 
+| Model Type | Model Name | Link |
+| ASR | Thonburain whisper |link[https://github.com/biodatlab/thonburian-whisper]| 
+| LLM | KhanommThan | link[https://huggingface.co/pythainlp/KhanomTanLLM-1B] 
+| TTS | vachanatts | - |
+ 
 
 Our model 
 
