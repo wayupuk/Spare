@@ -56,3 +56,11 @@ vachanatts is a tts libs we use in this repo
 
 main.py is a main programs that run the web application base-on fast-api
 
+# Greate Reminder
+  The fall of accuracy occured from a testset that is less than we expect and need to test and data is not in a realword situation enough so the accuracy will be falling aprat when test on production in this case 89 -> 43 acc.
+
+  Language model , TTS , ASR still lack of speed when test run due to the compute in lack. 
+
+
+  if you want to conitnue in this project please update a comput unit , plans and data first and every thing can keep continue easier
+
